@@ -6,7 +6,7 @@ SQLite and transparently transformed for PostgreSQL via the manager's dialect.
 """
 from __future__ import annotations
 
-from app.core.exceptions import DatabaseError
+from app.core.exceptions import ConflictError, DatabaseError
 from app.core.logging import BaseLogger
 from app.core.security import PasswordHasher
 from app.infrastructure.database.manager import BaseDatabaseManager
@@ -143,7 +143,7 @@ class SchemaInitializer:
         try:
             with self._db.transaction():
                 self._seed()
-        except DatabaseError:
+        except (DatabaseError, ConflictError):
             # Several containers can boot against the same DB at once; the
             # first one wins the seed, the others just continue.
             self._logger.warning("seed skipped — another instance seeded first")

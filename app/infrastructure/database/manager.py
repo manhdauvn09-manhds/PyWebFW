@@ -23,7 +23,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
-from app.core.exceptions import ConfigurationError, DatabaseError
+from app.core.exceptions import ConfigurationError, ConflictError, DatabaseError
 from app.core.logging import BaseLogger
 
 
@@ -158,6 +158,7 @@ class PooledDatabaseManager(BaseDatabaseManager, ABC):
     def __init__(self, pool_size: int, logger: BaseLogger) -> None:
         self._logger = logger
         self._errors = self._driver_error_types()
+        self._integrity = self._integrity_error_types()
         self._pool = ConnectionPool(self._create_connection, max_size=pool_size)
         self._tx_conn: ContextVar[PooledConnection | None] = ContextVar("tx_conn", default=None)
 
@@ -167,6 +168,10 @@ class PooledDatabaseManager(BaseDatabaseManager, ABC):
 
     @abstractmethod
     def _driver_error_types(self) -> tuple[type[BaseException], ...]: ...
+
+    @abstractmethod
+    def _integrity_error_types(self) -> tuple[type[BaseException], ...]:
+        """Constraint-violation errors (UNIQUE, FK, CHECK) — mapped to 409."""
 
     @abstractmethod
     def _execute_write(self, conn: PooledConnection, sql: str,
@@ -196,7 +201,10 @@ class PooledDatabaseManager(BaseDatabaseManager, ABC):
                 cursor = conn.raw.execute(self._translate(sql), tuple(params))
                 return [dict(row) for row in cursor.fetchall()]
         except self._errors as exc:
-            raise DatabaseError(f"Query failed: {exc}") from exc
+            # Driver detail (table/column names) goes to the log only —
+            # clients get a sanitized message.
+            self._logger.error("query failed", error=str(exc))
+            raise DatabaseError("Database query failed") from exc
 
     def execute(self, sql: str, params: Sequence[Any] = ()) -> int:
         is_insert = sql.lstrip().upper().startswith("INSERT")
@@ -207,8 +215,14 @@ class PooledDatabaseManager(BaseDatabaseManager, ABC):
                 if self._tx_conn.get() is None:
                     conn.raw.commit()
                 return result
+        except self._integrity as exc:
+            # Lost race on a UNIQUE/FK constraint: a client error (409),
+            # not a server failure — and no schema details leak out.
+            self._logger.warning("integrity violation", error=str(exc))
+            raise ConflictError("Conflict: duplicate value or invalid reference") from exc
         except self._errors as exc:
-            raise DatabaseError(f"Statement failed: {exc}") from exc
+            self._logger.error("statement failed", error=str(exc))
+            raise DatabaseError("Database operation failed") from exc
 
     @contextlib.contextmanager
     def transaction(self) -> Iterator[None]:
@@ -263,6 +277,9 @@ class SQLiteDatabaseManager(PooledDatabaseManager):
     def _driver_error_types(self) -> tuple[type[BaseException], ...]:
         return (sqlite3.Error,)
 
+    def _integrity_error_types(self) -> tuple[type[BaseException], ...]:
+        return (sqlite3.IntegrityError,)
+
     def _create_connection(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -316,6 +333,9 @@ class PostgresDatabaseManager(PooledDatabaseManager):
 
     def _driver_error_types(self) -> tuple[type[BaseException], ...]:
         return (self._psycopg.Error,)
+
+    def _integrity_error_types(self) -> tuple[type[BaseException], ...]:
+        return (self._psycopg.IntegrityError,)
 
     def _create_connection(self):
         return self._psycopg.connect(self._dsn, row_factory=self._row_factory)
