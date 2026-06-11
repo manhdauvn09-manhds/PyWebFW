@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Class Design — PyWebFW</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html">📘 PyWebFW Docs</a>
+  <a href="architecture-design.html">Architecture</a>
+  <a class="active" href="class-design.html">Class Design</a>
+  <a href="srs.html">SRS</a>
+  <a href="guideline.html">Guideline</a>
+  <a href="user-manual.html">User Manual</a>
+</nav>
+<header class="doc-header">
+  <h1>Class Design</h1>
+  <p>Cây kế thừa và quan hệ giữa các đối tượng. Hộp nét đứt = Abstract Base Class (ABC);
+     mũi tên tam giác rỗng = kế thừa (is-a); ký hiệu ◆ = composition (has-a).</p>
+</header>
+<main>
+
+<section class="card">
+  <h2>1. Page Object Model (tầng giao diện)</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="inh1" markerWidth="12" markerHeight="12" refX="10" refY="5" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="#fff" stroke="#475569" stroke-width="1.2"/>
+      </marker>
+    </defs>
+    <!-- BasePage -->
+    <rect x="420" y="16" width="160" height="40" rx="8" class="c-abc"/>
+    <text x="500" y="36" text-anchor="middle" class="t-title">BasePage</text>
+    <text x="500" y="50" text-anchor="middle" class="t-small">«abstract» render()</text>
+    <!-- level 2 -->
+    <rect x="170" y="104" width="150" height="36" rx="8" class="c-abc"/>
+    <text x="245" y="127" text-anchor="middle" class="t-title">PublicPage</text>
+    <rect x="600" y="104" width="150" height="36" rx="8" class="c-abc"/>
+    <text x="675" y="127" text-anchor="middle" class="t-title">AdminPage</text>
+    <rect x="800" y="104" width="160" height="36" rx="8" class="c-web"/>
+    <text x="880" y="127" text-anchor="middle">AdminLoginPage</text>
+    <line x1="245" y1="104" x2="470" y2="58" class="edge" marker-end="url(#inh1)"/>
+    <line x1="675" y1="104" x2="530" y2="58" class="edge" marker-end="url(#inh1)"/>
+    <line x1="880" y1="104" x2="578" y2="44" class="edge" marker-end="url(#inh1)"/>
+    <!-- level 3 public -->
+    <rect x="20" y="192" width="110" height="32" rx="7" class="c-web"/>
+    <text x="75" y="212" text-anchor="middle">HomePage</text>
+    <rect x="140" y="192" width="110" height="32" rx="7" class="c-web"/>
+    <text x="195" y="212" text-anchor="middle">SearchPage</text>
+    <rect x="260" y="192" width="110" height="32" rx="7" class="c-web"/>
+    <text x="315" y="212" text-anchor="middle">SitemapPage</text>
+    <rect x="380" y="192" width="120" height="32" rx="7" class="c-abc"/>
+    <text x="440" y="212" text-anchor="middle" class="t-title">ContentPage</text>
+    <line x1="75" y1="192" x2="218" y2="142" class="edge" marker-end="url(#inh1)"/>
+    <line x1="195" y1="192" x2="235" y2="142" class="edge" marker-end="url(#inh1)"/>
+    <line x1="315" y1="192" x2="258" y2="142" class="edge" marker-end="url(#inh1)"/>
+    <line x1="440" y1="192" x2="290" y2="142" class="edge" marker-end="url(#inh1)"/>
+    <!-- level 4 content pages -->
+    <g>
+      <rect x="20" y="280" width="100" height="30" rx="7" class="c-web"/>
+      <text x="70" y="299" text-anchor="middle">AboutPage</text>
+      <rect x="130" y="280" width="130" height="30" rx="7" class="c-web"/>
+      <text x="195" y="299" text-anchor="middle">IntroductionPage</text>
+      <rect x="270" y="280" width="110" height="30" rx="7" class="c-web"/>
+      <text x="325" y="299" text-anchor="middle">ContactPage</text>
+      <rect x="20" y="324" width="150" height="30" rx="7" class="c-web"/>
+      <text x="95" y="343" text-anchor="middle">PrivacyPolicyPage</text>
+      <rect x="180" y="324" width="100" height="30" rx="7" class="c-web"/>
+      <text x="230" y="343" text-anchor="middle">TermsPage</text>
+      <rect x="290" y="324" width="160" height="30" rx="7" class="c-web"/>
+      <text x="370" y="343" text-anchor="middle">EditorialPolicyPage</text>
+    </g>
+    <line x1="70" y1="280" x2="412" y2="224" class="edge" marker-end="url(#inh1)"/>
+    <line x1="195" y1="280" x2="424" y2="224" class="edge" marker-end="url(#inh1)"/>
+    <line x1="325" y1="280" x2="436" y2="224" class="edge" marker-end="url(#inh1)"/>
+    <line x1="95" y1="324" x2="416" y2="224" class="edge" marker-end="url(#inh1)"/>
+    <line x1="230" y1="324" x2="430" y2="224" class="edge" marker-end="url(#inh1)"/>
+    <line x1="370" y1="324" x2="444" y2="224" class="edge" marker-end="url(#inh1)"/>
+    <!-- level 3 admin -->
+    <g>
+      <rect x="540" y="192" width="130" height="32" rx="7" class="c-api"/>
+      <text x="605" y="212" text-anchor="middle">AdminHomePage</text>
+      <rect x="680" y="192" width="130" height="32" rx="7" class="c-api"/>
+      <text x="745" y="212" text-anchor="middle">DashboardPage</text>
+      <rect x="820" y="192" width="170" height="32" rx="7" class="c-api"/>
+      <text x="905" y="212" text-anchor="middle">UserManagementPage</text>
+      <rect x="540" y="240" width="170" height="32" rx="7" class="c-api"/>
+      <text x="625" y="260" text-anchor="middle">MenuManagementPage</text>
+      <rect x="720" y="240" width="160" height="32" rx="7" class="c-api"/>
+      <text x="800" y="260" text-anchor="middle">LogManagementPage</text>
+      <rect x="540" y="288" width="230" height="32" rx="7" class="c-api"/>
+      <text x="655" y="308" text-anchor="middle">DbConnectionManagementPage</text>
+    </g>
+    <line x1="605" y1="192" x2="655" y2="142" class="edge" marker-end="url(#inh1)"/>
+    <line x1="745" y1="192" x2="690" y2="142" class="edge" marker-end="url(#inh1)"/>
+    <line x1="905" y1="192" x2="742" y2="135" class="edge" marker-end="url(#inh1)"/>
+    <line x1="625" y1="240" x2="662" y2="142" class="edge" marker-end="url(#inh1)"/>
+    <line x1="800" y1="240" x2="706" y2="142" class="edge" marker-end="url(#inh1)"/>
+    <line x1="655" y1="288" x2="670" y2="142" class="edge" marker-end="url(#inh1)"/>
+  </svg>
+  <figcaption>Hình 1.1 — Cây kế thừa Page: thêm trang CMS mới chỉ cần subclass <code>ContentPage</code> và gán <code>slug</code>.</figcaption>
+  </figure>
+  <table>
+    <tr><th>Class</th><th>Trách nhiệm</th><th>Cộng tác với</th></tr>
+    <tr><td><code>BasePage</code></td><td>Template Method <code>render()</code>: title + seo() + breadcrumbs() + build_content() → layout</td><td><code>PageContext</code>, <code>BaseLayout</code>, <code>SeoMeta</code></td></tr>
+    <tr><td><code>PublicPage</code> / <code>AdminPage</code></td><td>Gán layout đúng vùng; AdminPage ép <code>noindex</code> + breadcrumb gốc "Admin"</td><td><code>PublicLayout</code> / <code>AdminLayout</code></td></tr>
+    <tr><td><code>ContentPage</code></td><td>Trang CMS tổng quát — load nội dung theo <code>slug</code>, SEO từ DB</td><td><code>ContentService</code></td></tr>
+    <tr><td>UI Components</td><td><code>UiComponent</code> (Composite): Header, Navigation, Footer, Breadcrumbs, SeoMeta, Table, Form, SearchForm, StatCard — tự render, tự escape</td><td>được Layout/Page compose</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>2. Controller hierarchy (Web + API)</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 350" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="inh2" markerWidth="12" markerHeight="12" refX="10" refY="5" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="#fff" stroke="#475569" stroke-width="1.2"/>
+      </marker>
+    </defs>
+    <rect x="400" y="16" width="200" height="42" rx="8" class="c-abc"/>
+    <text x="500" y="36" text-anchor="middle" class="t-title">BaseController</text>
+    <text x="500" y="51" text-anchor="middle" class="t-small">build_router() «template»</text>
+    <rect x="60" y="110" width="190" height="36" rx="8" class="c-web"/>
+    <text x="155" y="133" text-anchor="middle">PublicWebController</text>
+    <rect x="270" y="110" width="190" height="36" rx="8" class="c-web"/>
+    <text x="365" y="133" text-anchor="middle">AdminWebController</text>
+    <rect x="560" y="110" width="200" height="36" rx="8" class="c-abc"/>
+    <text x="660" y="133" text-anchor="middle" class="t-title">BaseApiController</text>
+    <line x1="155" y1="110" x2="442" y2="60" class="edge" marker-end="url(#inh2)"/>
+    <line x1="365" y1="110" x2="472" y2="60" class="edge" marker-end="url(#inh2)"/>
+    <line x1="660" y1="110" x2="540" y2="60" class="edge" marker-end="url(#inh2)"/>
+    <rect x="430" y="190" width="190" height="36" rx="8" class="c-api"/>
+    <text x="525" y="213" text-anchor="middle">PublicApiController</text>
+    <rect x="650" y="190" width="210" height="40" rx="8" class="c-abc"/>
+    <text x="755" y="208" text-anchor="middle" class="t-title">AdminApiController</text>
+    <text x="755" y="223" text-anchor="middle" class="t-small">◆ RoleGuard (RBAC)</text>
+    <line x1="525" y1="190" x2="630" y2="148" class="edge" marker-end="url(#inh2)"/>
+    <line x1="755" y1="190" x2="690" y2="148" class="edge" marker-end="url(#inh2)"/>
+    <g>
+      <rect x="400" y="280" width="90" height="30" rx="7" class="c-api"/>
+      <text x="445" y="299" text-anchor="middle">Auth</text>
+      <rect x="500" y="280" width="90" height="30" rx="7" class="c-api"/>
+      <text x="545" y="299" text-anchor="middle">User</text>
+      <rect x="600" y="280" width="90" height="30" rx="7" class="c-api"/>
+      <text x="645" y="299" text-anchor="middle">Menu</text>
+      <rect x="700" y="280" width="90" height="30" rx="7" class="c-api"/>
+      <text x="745" y="299" text-anchor="middle">Log</text>
+      <rect x="800" y="280" width="100" height="30" rx="7" class="c-api"/>
+      <text x="850" y="299" text-anchor="middle">Dashboard</text>
+      <rect x="910" y="280" width="80" height="30" rx="7" class="c-api"/>
+      <text x="950" y="299" text-anchor="middle">System</text>
+    </g>
+    <line x1="445" y1="280" x2="700" y2="232" class="edge" marker-end="url(#inh2)"/>
+    <line x1="545" y1="280" x2="715" y2="232" class="edge" marker-end="url(#inh2)"/>
+    <line x1="645" y1="280" x2="735" y2="232" class="edge" marker-end="url(#inh2)"/>
+    <line x1="745" y1="280" x2="755" y2="232" class="edge" marker-end="url(#inh2)"/>
+    <line x1="850" y1="280" x2="785" y2="232" class="edge" marker-end="url(#inh2)"/>
+    <line x1="950" y1="280" x2="810" y2="232" class="edge" marker-end="url(#inh2)"/>
+    <text x="690" y="330" text-anchor="middle" class="t-small">6 controller con đều thừa hưởng sẵn guard RBAC từ AdminApiController — thêm resource mới = 1 subclass</text>
+  </svg>
+  <figcaption>Hình 2.1 — Controller hierarchy: Template Method ở gốc, RBAC tập trung tại <code>AdminApiController</code>.</figcaption>
+  </figure>
+</section>
+
+<section class="card">
+  <h2>3. Service &amp; Repository layer</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 330" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="inh3" markerWidth="12" markerHeight="12" refX="10" refY="5" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="#fff" stroke="#475569" stroke-width="1.2"/>
+      </marker>
+      <marker id="ar4" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+        <path d="M0,0 L8,3.5 L0,7 z" fill="#64748b"/>
+      </marker>
+    </defs>
+    <!-- services -->
+    <rect x="100" y="16" width="170" height="40" rx="8" class="c-abc"/>
+    <text x="185" y="36" text-anchor="middle" class="t-title">BaseService</text>
+    <text x="185" y="51" text-anchor="middle" class="t-small">logger có sẵn</text>
+    <rect x="300" y="16" width="160" height="40" rx="8" class="c-abc"/>
+    <text x="380" y="36" text-anchor="middle" class="t-title">AuditMixin</text>
+    <text x="380" y="51" text-anchor="middle" class="t-small">_audit() → DB</text>
+    <g>
+      <rect x="30" y="120" width="90" height="30" rx="7" class="c-svc"/><text x="75" y="139" text-anchor="middle">Auth</text>
+      <rect x="130" y="120" width="90" height="30" rx="7" class="c-svc"/><text x="175" y="139" text-anchor="middle">User</text>
+      <rect x="230" y="120" width="90" height="30" rx="7" class="c-svc"/><text x="275" y="139" text-anchor="middle">Menu</text>
+      <rect x="330" y="120" width="90" height="30" rx="7" class="c-svc"/><text x="375" y="139" text-anchor="middle">System</text>
+      <rect x="30" y="164" width="90" height="30" rx="7" class="c-svc"/><text x="75" y="183" text-anchor="middle">Content</text>
+      <rect x="130" y="164" width="90" height="30" rx="7" class="c-svc"/><text x="175" y="183" text-anchor="middle">Search</text>
+      <rect x="230" y="164" width="100" height="30" rx="7" class="c-svc"/><text x="280" y="183" text-anchor="middle">Dashboard</text>
+    </g>
+    <line x1="75" y1="120" x2="148" y2="58" class="edge" marker-end="url(#inh3)"/>
+    <line x1="175" y1="120" x2="172" y2="58" class="edge" marker-end="url(#inh3)"/>
+    <line x1="275" y1="120" x2="200" y2="58" class="edge" marker-end="url(#inh3)"/>
+    <line x1="375" y1="120" x2="380" y2="58" class="edge dashed" marker-end="url(#inh3)"/>
+    <line x1="75" y1="164" x2="135" y2="58" class="edge" marker-end="url(#inh3)"/>
+    <line x1="175" y1="164" x2="165" y2="58" class="edge" marker-end="url(#inh3)"/>
+    <line x1="280" y1="164" x2="212" y2="58" class="edge" marker-end="url(#inh3)"/>
+    <text x="200" y="230" text-anchor="middle" class="t-small">Auth/User/Menu/System mix-in thêm AuditMixin (nét đứt)</text>
+    <!-- repos -->
+    <rect x="600" y="16" width="220" height="42" rx="8" class="c-abc"/>
+    <text x="710" y="36" text-anchor="middle" class="t-title">BaseRepository[T]</text>
+    <text x="710" y="52" text-anchor="middle" class="t-small">CRUD + paging + sort whitelist</text>
+    <g>
+      <rect x="520" y="120" width="90" height="30" rx="7" class="c-repo"/><text x="565" y="139" text-anchor="middle">User</text>
+      <rect x="620" y="120" width="90" height="30" rx="7" class="c-repo"/><text x="665" y="139" text-anchor="middle">Menu</text>
+      <rect x="720" y="120" width="90" height="30" rx="7" class="c-repo"/><text x="765" y="139" text-anchor="middle">Log</text>
+      <rect x="820" y="120" width="90" height="30" rx="7" class="c-repo"/><text x="865" y="139" text-anchor="middle">Content</text>
+      <rect x="620" y="164" width="160" height="30" rx="7" class="c-repo"/><text x="700" y="183" text-anchor="middle">DbConnection</text>
+    </g>
+    <line x1="565" y1="120" x2="668" y2="60" class="edge" marker-end="url(#inh3)"/>
+    <line x1="665" y1="120" x2="698" y2="60" class="edge" marker-end="url(#inh3)"/>
+    <line x1="765" y1="120" x2="722" y2="60" class="edge" marker-end="url(#inh3)"/>
+    <line x1="865" y1="120" x2="752" y2="60" class="edge" marker-end="url(#inh3)"/>
+    <line x1="700" y1="164" x2="710" y2="60" class="edge" marker-end="url(#inh3)"/>
+    <!-- composition arrows -->
+    <line x1="430" y1="135" x2="510" y2="135" class="edge" marker-end="url(#ar4)"/>
+    <text x="470" y="127" text-anchor="middle" class="t-small">◆ has-a</text>
+    <!-- infra ABCs -->
+    <rect x="540" y="240" width="200" height="36" rx="8" class="c-abc"/>
+    <text x="640" y="263" text-anchor="middle" class="t-title">BaseDatabaseManager</text>
+    <rect x="760" y="240" width="180" height="36" rx="8" class="c-infra"/>
+    <text x="850" y="263" text-anchor="middle">SQLiteDatabaseManager</text>
+    <line x1="760" y1="258" x2="742" y2="258" class="edge" marker-end="url(#inh3)"/>
+    <line x1="700" y1="194" x2="640" y2="238" class="edge" marker-end="url(#ar4)"/>
+    <text x="710" y="222" class="t-small">repo chỉ biết ABC</text>
+  </svg>
+  <figcaption>Hình 3.1 — Service (kế thừa + mixin) và Repository (generic): mọi phụ thuộc hạ tầng dừng ở ABC.</figcaption>
+  </figure>
+  <table>
+    <tr><th>Class</th><th>Trách nhiệm chính</th></tr>
+    <tr><td><code>AuthService</code></td><td>Đăng nhập (verify PBKDF2, chống enumeration), phát hành token, audit cả thành công/thất bại</td></tr>
+    <tr><td><code>UserService</code></td><td>CRUD user: business validation, check trùng, hash mật khẩu, UnitOfWork (user + audit nguyên tử)</td></tr>
+    <tr><td><code>MenuService</code></td><td>Menu theo vùng (read-through cache TTL 300s), CRUD invalidate cache, warm_cache cho job</td></tr>
+    <tr><td><code>ContentService</code></td><td>Trang CMS theo slug (cache), sitemap entries, RSS items</td></tr>
+    <tr><td><code>SearchService</code></td><td>Tìm kiếm nội dung published, chặn query &lt; 2 ký tự</td></tr>
+    <tr><td><code>DashboardService</code></td><td>Gom metrics: đếm bảng, log theo level, health DB, cache stats</td></tr>
+    <tr><td><code>SystemService</code></td><td>Hồ sơ kết nối DB (mask DSN), tổng hợp <code>BaseHealthChecker</code> (server + database)</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>4. Scheduler framework</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 300" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="inh4" markerWidth="12" markerHeight="12" refX="10" refY="5" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="#fff" stroke="#475569" stroke-width="1.2"/>
+      </marker>
+      <marker id="ar5" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+        <path d="M0,0 L8,3.5 L0,7 z" fill="#64748b"/>
+      </marker>
+    </defs>
+    <rect x="60" y="20" width="150" height="40" rx="8" class="c-abc"/>
+    <text x="135" y="40" text-anchor="middle" class="t-title">Schedule</text>
+    <text x="135" y="55" text-anchor="middle" class="t-small">«strategy» is_due()</text>
+    <rect x="20" y="110" width="140" height="32" rx="7" class="c-sched"/>
+    <text x="90" y="130" text-anchor="middle">IntervalSchedule</text>
+    <rect x="170" y="110" width="150" height="32" rx="7" class="c-sched"/>
+    <text x="245" y="130" text-anchor="middle">DailyTimeSchedule</text>
+    <line x1="90" y1="110" x2="120" y2="62" class="edge" marker-end="url(#inh4)"/>
+    <line x1="245" y1="110" x2="155" y2="62" class="edge" marker-end="url(#inh4)"/>
+    <rect x="400" y="20" width="200" height="44" rx="8" class="c-abc"/>
+    <text x="500" y="40" text-anchor="middle" class="t-title">BaseSchedulerJob</text>
+    <text x="500" y="56" text-anchor="middle" class="t-small">execute() = retry + timing + log</text>
+    <line x1="400" y1="42" x2="212" y2="42" class="edge" marker-end="url(#ar5)"/>
+    <text x="306" y="34" text-anchor="middle" class="t-small">◆ schedule · ◆ RetryPolicy</text>
+    <g>
+      <rect x="330" y="130" width="160" height="30" rx="7" class="c-sched"/><text x="410" y="149" text-anchor="middle">ServerHealthCheckJob</text>
+      <rect x="500" y="130" width="180" height="30" rx="7" class="c-sched"/><text x="590" y="149" text-anchor="middle">DatabaseHealthCheckJob</text>
+      <rect x="330" y="174" width="130" height="30" rx="7" class="c-sched"/><text x="395" y="193" text-anchor="middle">LogCleanupJob</text>
+      <rect x="470" y="174" width="140" height="30" rx="7" class="c-sched"/><text x="540" y="193" text-anchor="middle">CacheWarmupJob</text>
+      <rect x="330" y="218" width="170" height="30" rx="7" class="c-sched"/><text x="415" y="237" text-anchor="middle">DatabaseOptimizeJob</text>
+      <rect x="510" y="218" width="200" height="30" rx="7" class="c-sched"/><text x="610" y="237" text-anchor="middle">IdleConnectionCloserJob</text>
+    </g>
+    <line x1="410" y1="130" x2="470" y2="66" class="edge" marker-end="url(#inh4)"/>
+    <line x1="590" y1="130" x2="530" y2="66" class="edge" marker-end="url(#inh4)"/>
+    <line x1="395" y1="174" x2="462" y2="66" class="edge" marker-end="url(#inh4)"/>
+    <line x1="540" y1="174" x2="516" y2="66" class="edge" marker-end="url(#inh4)"/>
+    <line x1="415" y1="218" x2="468" y2="66" class="edge" marker-end="url(#inh4)"/>
+    <line x1="610" y1="218" x2="540" y2="66" class="edge" marker-end="url(#inh4)"/>
+    <rect x="720" y="20" width="170" height="40" rx="8" class="c-sched"/>
+    <text x="805" y="40" text-anchor="middle" class="t-title">SchedulerEngine</text>
+    <text x="805" y="55" text-anchor="middle" class="t-small">async loop · status_report</text>
+    <rect x="720" y="110" width="170" height="36" rx="8" class="c-sched"/>
+    <text x="805" y="133" text-anchor="middle">JobRegistry</text>
+    <line x1="805" y1="110" x2="805" y2="62" class="edge" marker-end="url(#ar5)"/>
+    <text x="830" y="90" class="t-small">◆</text>
+    <line x1="720" y1="128" x2="612" y2="42" class="edge" marker-end="url(#ar5)"/>
+    <rect x="720" y="190" width="170" height="36" rx="8" class="c-repo"/>
+    <text x="805" y="213" text-anchor="middle">LogRepository (audit)</text>
+    <line x1="805" y1="190" x2="805" y2="148" class="edge dashed" marker-end="url(#ar5)"/>
+  </svg>
+  <figcaption>Hình 4.1 — Scheduler: Strategy (Schedule) + Template Method (execute) + Registry; mỗi JobResult được ghi audit log.</figcaption>
+  </figure>
+</section>
+
+<section class="card">
+  <h2>5. Hạ tầng &amp; kernel (các ABC còn lại)</h2>
+  <table>
+    <tr><th>ABC / Base</th><th>Implementation hiện có</th><th>Mở rộng tương lai</th></tr>
+    <tr><td><code>BaseDatabaseManager</code> → <code>PooledDatabaseManager</code></td><td><code>SQLiteDatabaseManager</code> (mặc định) · <code>PostgresDatabaseManager</code> (DB_DRIVER=postgres) — pool, transaction ambient, idle-close dùng chung</td><td>MySQLDatabaseManager</td></tr>
+    <tr><td><code>BaseCacheManager</code></td><td><code>InMemoryCacheManager</code> (mặc định) · <code>RedisCacheManager</code> (CACHE_BACKEND=redis, multi-instance)</td><td>—</td></tr>
+    <tr><td><code>BaseAuthHandler</code></td><td><code>TokenAuthHandler</code> (Bearer header hoặc cookie HttpOnly)</td><td>OAuth2/OIDC handler</td></tr>
+    <tr><td><code>AuthGuard</code> → <code>RoleGuard</code></td><td>Guard callable làm FastAPI dependency; RoleGuard <em>is-a</em> AuthGuard + RBAC</td><td>PermissionGuard chi tiết hơn role</td></tr>
+    <tr><td><code>BaseLogger</code></td><td><code>StructuredLogger</code> (JSON line)</td><td>OTLP exporter</td></tr>
+    <tr><td><code>BaseResponse</code></td><td><code>ApiResponse[T]</code> — envelope chuẩn {success, data, error, meta}</td><td>—</td></tr>
+    <tr><td><code>BaseValidator[T]</code></td><td><code>UserInputValidator</code></td><td>Validator cho mỗi aggregate mới</td></tr>
+    <tr><td><code>BaseHealthChecker</code></td><td>ServerHealthChecker, DatabaseHealthChecker</td><td>ExternalApiHealthChecker…</td></tr>
+    <tr><td><code>BaseEntity</code></td><td>User, MenuItem, AuditLog, ContentItem, DbConnectionProfile</td><td>Entity mới cho domain mới</td></tr>
+    <tr><td><code>FrameworkError</code></td><td>10 exception con, mỗi loại mang status_code + error_code ổn định</td><td>—</td></tr>
+  </table>
+  <div class="note"><strong>Quy ước:</strong> ưu tiên <em>composition</em> (Settings, AuditMixin, UiComponent, Engine◆Registry) cho quan hệ "has-a";
+  chỉ dùng <em>inheritance</em> khi quan hệ thực sự là "is-a" và cha sở hữu pipeline chung (Template Method).</div>
+</section>
+
+</main>
+<footer class="doc-footer">PyWebFW Documentation · Class Design · 2026-06-11</footer>
+</body>
+</html>

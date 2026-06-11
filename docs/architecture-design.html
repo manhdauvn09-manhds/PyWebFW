@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture Design — PyWebFW</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html">📘 PyWebFW Docs</a>
+  <a class="active" href="architecture-design.html">Architecture</a>
+  <a href="class-design.html">Class Design</a>
+  <a href="srs.html">SRS</a>
+  <a href="guideline.html">Guideline</a>
+  <a href="user-manual.html">User Manual</a>
+</nav>
+<header class="doc-header">
+  <h1>Architecture Design</h1>
+  <p>Kiến trúc phân tầng (Layered + Clean Architecture), một codebase triển khai linh hoạt theo module,
+     dependency luôn hướng vào trong qua các Abstract Base Class.</p>
+</header>
+<main>
+
+<section class="card">
+  <h2>1. Tổng quan stack</h2>
+  <table>
+    <tr><th>Tầng</th><th>Công nghệ</th><th>Vai trò</th></tr>
+    <tr><td>HTTP engine</td><td>FastAPI / Starlette / Uvicorn</td><td>ASGI, routing thô, request/response — phần duy nhất không tự viết</td></tr>
+    <tr><td>Framework OOP</td><td>Code tự sở hữu (app/)</td><td>Controllers, Pages, Services, Repositories, Scheduler, DI, Cache, Auth</td></tr>
+    <tr><td>Validation biên</td><td>Pydantic v2</td><td>Validate <em>shape</em> của payload API</td></tr>
+    <tr><td>Validation nghiệp vụ</td><td><code>BaseValidator</code></td><td>Business rules ở tầng service (unique, policy…)</td></tr>
+    <tr><td>Database</td><td>SQLite (mặc định) sau <code>BaseDatabaseManager</code></td><td>Pool + idle-close + transaction ambient; thay engine không sửa tầng trên</td></tr>
+    <tr><td>Đóng gói</td><td>Docker, 1 image — <code>APP_MODULES</code> chọn vai trò runtime</td><td>Gộp 1 server hoặc tách FE / Admin / Scheduler</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>2. Sơ đồ kiến trúc phân tầng</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 660" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ar1" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+        <path d="M0,0 L8,3.5 L0,7 z" fill="#64748b"/>
+      </marker>
+    </defs>
+    <!-- clients -->
+    <rect x="340" y="14" width="320" height="42" rx="20" class="c-http"/>
+    <text x="500" y="40" text-anchor="middle" class="t-white">Browser / API Client / Load Balancer</text>
+    <line x1="500" y1="56" x2="500" y2="84" class="edge" marker-end="url(#ar1)"/>
+    <!-- middleware -->
+    <rect x="200" y="86" width="600" height="58" rx="8" class="c-mw"/>
+    <text x="500" y="104" text-anchor="middle" class="t-title">Middleware (Chain of Responsibility)</text>
+    <text x="500" y="126" text-anchor="middle" class="t-small">SecurityHeaders → RateLimit (sliding window / IP) → RequestLogging (JSON)</text>
+    <line x1="350" y1="144" x2="300" y2="176" class="edge" marker-end="url(#ar1)"/>
+    <line x1="650" y1="144" x2="700" y2="176" class="edge" marker-end="url(#ar1)"/>
+    <!-- controllers -->
+    <rect x="150" y="178" width="300" height="56" rx="8" class="c-web"/>
+    <text x="300" y="198" text-anchor="middle" class="t-title">Web Controllers (HTML)</text>
+    <text x="300" y="218" text-anchor="middle" class="t-small">PublicWebController · AdminWebController</text>
+    <rect x="550" y="178" width="300" height="56" rx="8" class="c-api"/>
+    <text x="700" y="198" text-anchor="middle" class="t-title">API Controllers (JSON)</text>
+    <text x="700" y="218" text-anchor="middle" class="t-small">PublicApiController · Admin*ApiController ×6</text>
+    <!-- pages -->
+    <line x1="300" y1="234" x2="300" y2="266" class="edge" marker-end="url(#ar1)"/>
+    <rect x="150" y="268" width="300" height="56" rx="8" class="c-web"/>
+    <text x="300" y="288" text-anchor="middle" class="t-title">Page Objects + UI Components</text>
+    <text x="300" y="308" text-anchor="middle" class="t-small">BasePage → PublicPage / AdminPage · Composite UI</text>
+    <!-- services -->
+    <line x1="300" y1="324" x2="420" y2="356" class="edge" marker-end="url(#ar1)"/>
+    <line x1="700" y1="234" x2="580" y2="356" class="edge" marker-end="url(#ar1)"/>
+    <rect x="250" y="358" width="500" height="56" rx="8" class="c-svc"/>
+    <text x="500" y="378" text-anchor="middle" class="t-title">Service Layer (business rules · audit · cache)</text>
+    <text x="500" y="398" text-anchor="middle" class="t-small">Auth · User · Menu · Content · Search · Dashboard · System (+ AuditMixin)</text>
+    <!-- repositories -->
+    <line x1="500" y1="414" x2="500" y2="446" class="edge" marker-end="url(#ar1)"/>
+    <rect x="250" y="448" width="500" height="52" rx="8" class="c-repo"/>
+    <text x="500" y="468" text-anchor="middle" class="t-title">Repository Layer (SQL parameterized · mapping)</text>
+    <text x="500" y="488" text-anchor="middle" class="t-small">BaseRepository[T] → User / Menu / Log / Content / DbConnection</text>
+    <!-- infra -->
+    <line x1="420" y1="500" x2="370" y2="532" class="edge" marker-end="url(#ar1)"/>
+    <line x1="580" y1="500" x2="660" y2="532" class="edge dashed"/>
+    <rect x="220" y="534" width="320" height="52" rx="8" class="c-infra"/>
+    <text x="380" y="554" text-anchor="middle" class="t-title">BaseDatabaseManager (ABC)</text>
+    <text x="380" y="574" text-anchor="middle" class="t-small">ConnectionPool · UnitOfWork · idle-close</text>
+    <rect x="580" y="534" width="200" height="52" rx="8" class="c-infra"/>
+    <text x="680" y="554" text-anchor="middle" class="t-title">BaseCacheManager</text>
+    <text x="680" y="574" text-anchor="middle" class="t-small">InMemory (Redis sau này)</text>
+    <line x1="380" y1="586" x2="380" y2="614" class="edge" marker-end="url(#ar1)"/>
+    <rect x="290" y="616" width="180" height="36" rx="14" class="c-db"/>
+    <text x="380" y="639" text-anchor="middle" class="t-title">SQLite / PostgreSQL</text>
+    <!-- scheduler side -->
+    <rect x="830" y="268" width="158" height="56" rx="8" class="c-sched"/>
+    <text x="909" y="288" text-anchor="middle" class="t-title">SchedulerEngine</text>
+    <text x="909" y="308" text-anchor="middle" class="t-small">tick · registry · retry</text>
+    <rect x="830" y="358" width="158" height="56" rx="8" class="c-sched"/>
+    <text x="909" y="378" text-anchor="middle" class="t-title">Jobs ×6</text>
+    <text x="909" y="398" text-anchor="middle" class="t-small">health · cleanup · optimize…</text>
+    <line x1="909" y1="324" x2="909" y2="356" class="edge" marker-end="url(#ar1)"/>
+    <line x1="830" y1="400" x2="752" y2="400" class="edge" marker-end="url(#ar1)"/>
+    <text x="790" y="392" text-anchor="middle" class="t-small">gọi services/DB</text>
+    <!-- legend note -->
+    <text x="60" y="640" class="t-small">Mũi tên liền: phụ thuộc trực tiếp · Mũi tên đứt: phụ thuộc qua cache (read-through)</text>
+  </svg>
+  <figcaption>Hình 2.1 — Kiến trúc phân tầng: dependency luôn hướng xuống và dừng ở ABC, không tầng nào biết chi tiết tầng dưới.</figcaption>
+  </figure>
+  <p><strong>Nguyên tắc cốt lõi:</strong> Domain không biết HTTP/SQL; Repository chỉ biết <code>BaseDatabaseManager</code> (không biết sqlite3);
+  Service chỉ biết Repository + các ABC hạ tầng; Controller chỉ biết Service. Toàn bộ wiring cụ thể nằm duy nhất ở
+  <code>app/bootstrap.py</code> (Composition Root).</p>
+</section>
+
+<section class="card">
+  <h2>3. Sơ đồ triển khai Docker (split mode)</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 430" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+        <path d="M0,0 L8,3.5 L0,7 z" fill="#64748b"/>
+      </marker>
+    </defs>
+    <!-- actors -->
+    <circle cx="80" cy="90" r="16" class="c-actor"/>
+    <line x1="80" y1="106" x2="80" y2="140" class="edge"/>
+    <line x1="60" y1="118" x2="100" y2="118" class="edge"/>
+    <line x1="80" y1="140" x2="64" y2="166" class="edge"/>
+    <line x1="80" y1="140" x2="96" y2="166" class="edge"/>
+    <text x="80" y="186" text-anchor="middle" class="t-small">End User</text>
+    <circle cx="80" cy="260" r="16" class="c-actor"/>
+    <line x1="80" y1="276" x2="80" y2="310" class="edge"/>
+    <line x1="60" y1="288" x2="100" y2="288" class="edge"/>
+    <line x1="80" y1="310" x2="64" y2="336" class="edge"/>
+    <line x1="80" y1="310" x2="96" y2="336" class="edge"/>
+    <text x="80" y="356" text-anchor="middle" class="t-small">Quản trị viên</text>
+    <!-- docker host -->
+    <rect x="190" y="30" width="640" height="370" rx="12" fill="none" stroke="#94a3b8" stroke-width="1.6" stroke-dasharray="8 5"/>
+    <text x="210" y="54" class="t-title">Docker Host (image chung: pywebfw:latest)</text>
+    <!-- fe container -->
+    <rect x="230" y="80" width="250" height="74" rx="8" class="c-web"/>
+    <text x="355" y="102" text-anchor="middle" class="t-title">Container: fe</text>
+    <text x="355" y="122" text-anchor="middle" class="t-small">APP_MODULES=public</text>
+    <text x="355" y="140" text-anchor="middle" class="t-small">:8001 → 8000 · healthz</text>
+    <!-- admin container -->
+    <rect x="230" y="180" width="250" height="74" rx="8" class="c-api"/>
+    <text x="355" y="202" text-anchor="middle" class="t-title">Container: admin</text>
+    <text x="355" y="222" text-anchor="middle" class="t-small">APP_MODULES=admin</text>
+    <text x="355" y="240" text-anchor="middle" class="t-small">:8002 → 8000 (mạng nội bộ/VPN)</text>
+    <!-- scheduler container -->
+    <rect x="230" y="280" width="250" height="74" rx="8" class="c-sched"/>
+    <text x="355" y="302" text-anchor="middle" class="t-title">Container: scheduler</text>
+    <text x="355" y="322" text-anchor="middle" class="t-small">APP_MODULES=scheduler</text>
+    <text x="355" y="340" text-anchor="middle" class="t-small">không mở port · seed DB đầu tiên</text>
+    <!-- volume -->
+    <rect x="600" y="170" width="190" height="90" rx="10" class="c-db"/>
+    <text x="695" y="200" text-anchor="middle" class="t-title">Volume: app-data</text>
+    <text x="695" y="222" text-anchor="middle" class="t-small">/app/data/app.db</text>
+    <text x="695" y="240" text-anchor="middle" class="t-small">SQLite WAL + busy_timeout</text>
+    <!-- edges -->
+    <line x1="100" y1="120" x2="228" y2="117" class="edge" marker-end="url(#ar2)"/>
+    <line x1="100" y1="290" x2="228" y2="217" class="edge" marker-end="url(#ar2)"/>
+    <line x1="480" y1="117" x2="610" y2="186" class="edge" marker-end="url(#ar2)"/>
+    <line x1="480" y1="217" x2="598" y2="215" class="edge" marker-end="url(#ar2)"/>
+    <line x1="480" y1="317" x2="610" y2="246" class="edge" marker-end="url(#ar2)"/>
+    <!-- note -->
+    <rect x="600" y="300" width="220" height="80" rx="8" fill="#fffbeb" stroke="#d97706" stroke-width="1.2"/>
+    <text x="710" y="324" text-anchor="middle" class="t-small">Muốn tách ra NHIỀU máy chủ:</text>
+    <text x="710" y="342" text-anchor="middle" class="t-small">thay volume bằng DB server tập trung</text>
+    <text x="710" y="360" text-anchor="middle" class="t-small">(implement BaseDatabaseManager</text>
+    <text x="710" y="376" text-anchor="middle" class="t-small">cho Postgres — tầng trên giữ nguyên)</text>
+  </svg>
+  <figcaption>Hình 3.1 — Split mode trên 1 host: 3 container, 1 image, 1 volume dữ liệu. Profile <code>allinone</code> chạy mọi module trong 1 container (:8000).</figcaption>
+  </figure>
+  <table>
+    <tr><th>Chế độ</th><th>APP_MODULES</th><th>Port</th><th>Phù hợp khi</th></tr>
+    <tr><td>fe</td><td><code>public</code></td><td>8001</td><td>Server public, không tồn tại route admin (giảm bề mặt tấn công)</td></tr>
+    <tr><td>admin</td><td><code>admin</code></td><td>8002</td><td>Server nội bộ / sau VPN cho quản trị</td></tr>
+    <tr><td>scheduler</td><td><code>scheduler</code></td><td>—</td><td>Worker chạy cron; chỉ expose <code>/healthz</code></td></tr>
+    <tr><td>allinone</td><td><code>public,admin,scheduler</code></td><td>8000</td><td>Hệ thống nhỏ, 1 server</td></tr>
+  </table>
+  <div class="note"><strong>HTTPS termination (profile <code>proxy</code>):</strong> container Caddy đứng trước toàn bộ hệ thống
+  ở cổng 80/443 — tự xin và gia hạn SSL Let's Encrypt theo <code>DOMAIN</code>/<code>ADMIN_DOMAIN</code>, redirect HTTP→HTTPS, thêm HSTS.
+  Các port ứng dụng chỉ bind <code>127.0.0.1</code>, uvicorn chạy <code>--proxy-headers</code> để rate-limit/log thấy đúng IP client thật.
+  Cookie admin có cờ <code>Secure</code> khi <code>APP_ENV=production</code>; endpoint login có limiter riêng (mặc định 5 lần / 5 phút / IP).</div>
+</section>
+
+<section class="card">
+  <h2>4. Luồng xử lý request (ví dụ GET /)</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 330" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ar3" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+        <path d="M0,0 L8,3.5 L0,7 z" fill="#64748b"/>
+      </marker>
+    </defs>
+    <rect x="20" y="40" width="130" height="48" rx="22" class="c-term"/>
+    <text x="85" y="68" text-anchor="middle" class="t-title">Browser GET /</text>
+    <line x1="150" y1="64" x2="186" y2="64" class="edge" marker-end="url(#ar3)"/>
+    <rect x="188" y="40" width="150" height="48" rx="8" class="c-mw"/>
+    <text x="263" y="60" text-anchor="middle">Middleware</text>
+    <text x="263" y="78" text-anchor="middle" class="t-small">headers·ratelimit·log</text>
+    <line x1="338" y1="64" x2="374" y2="64" class="edge" marker-end="url(#ar3)"/>
+    <rect x="376" y="40" width="180" height="48" rx="8" class="c-web"/>
+    <text x="466" y="60" text-anchor="middle">PublicWebController</text>
+    <text x="466" y="78" text-anchor="middle" class="t-small">tạo PageContext</text>
+    <line x1="556" y1="64" x2="592" y2="64" class="edge" marker-end="url(#ar3)"/>
+    <rect x="594" y="40" width="160" height="48" rx="8" class="c-svc"/>
+    <text x="674" y="60" text-anchor="middle">MenuService</text>
+    <text x="674" y="78" text-anchor="middle" class="t-small">menu cho Navigation</text>
+    <line x1="754" y1="64" x2="800" y2="64" class="edge" marker-end="url(#ar3)"/>
+    <!-- cache decision -->
+    <polygon points="870,30 950,64 870,98 790,64" class="c-dec"/>
+    <text x="870" y="60" text-anchor="middle">cache</text>
+    <text x="870" y="76" text-anchor="middle">hit?</text>
+    <line x1="870" y1="98" x2="870" y2="140" class="edge" marker-end="url(#ar3)"/>
+    <text x="892" y="122" class="t-small">miss</text>
+    <rect x="790" y="142" width="160" height="44" rx="8" class="c-repo"/>
+    <text x="870" y="162" text-anchor="middle">MenuRepository</text>
+    <text x="870" y="178" text-anchor="middle" class="t-small">SELECT … (pool)</text>
+    <line x1="950" y1="64" x2="980" y2="64" class="edge"/>
+    <line x1="980" y1="64" x2="980" y2="240" class="edge"/>
+    <text x="966" y="56" class="t-small">hit</text>
+    <line x1="870" y1="186" x2="870" y2="218" class="edge" marker-end="url(#ar3)"/>
+    <rect x="790" y="220" width="160" height="40" rx="8" class="c-infra"/>
+    <text x="870" y="245" text-anchor="middle" class="t-small">set cache TTL 300s</text>
+    <line x1="790" y1="240" x2="616" y2="240" class="edge" marker-end="url(#ar3)"/>
+    <line x1="980" y1="240" x2="952" y2="240" class="edge" marker-end="url(#ar3)"/>
+    <!-- page render -->
+    <rect x="436" y="216" width="180" height="48" rx="8" class="c-web"/>
+    <text x="526" y="236" text-anchor="middle">HomePage.render()</text>
+    <text x="526" y="254" text-anchor="middle" class="t-small">Layout + Components + esc()</text>
+    <line x1="436" y1="240" x2="400" y2="240" class="edge" marker-end="url(#ar3)"/>
+    <rect x="250" y="216" width="148" height="48" rx="22" class="c-term"/>
+    <text x="324" y="236" text-anchor="middle" class="t-title">HTML 200</text>
+    <text x="324" y="254" text-anchor="middle" class="t-small">+ security headers</text>
+  </svg>
+  <figcaption>Hình 4.1 — Flow GET /: controller dựng PageContext, service đọc menu (read-through cache), page object render qua layout.</figcaption>
+  </figure>
+  <h3>Các luồng chính khác</h3>
+  <table>
+    <tr><th>Luồng</th><th>Đường đi</th></tr>
+    <tr><td>Admin login</td><td>POST /api/admin/auth/login → AuthService (PBKDF2 verify, audit) → TokenManager.issue → cookie HttpOnly SameSite=Strict → redirect /admin</td></tr>
+    <tr><td>User CRUD</td><td>RoleGuard (RBAC) → Pydantic (shape) → UserInputValidator (business) → UnitOfWork: insert + audit log nguyên tử</td></tr>
+    <tr><td>Scheduler job</td><td>Engine tick → Schedule.is_due → job.execute() (retry + timing) → JobResult → audit log → dashboard/healthz</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>5. Design patterns sử dụng</h2>
+  <table>
+    <tr><th>Pattern</th><th>Vị trí</th><th>Lý do</th></tr>
+    <tr><td>Template Method</td><td><code>BasePage.render</code>, <code>BaseValidator.validate</code>, <code>BaseSchedulerJob.execute</code>, <code>BaseController.build_router</code>, <code>BaseLayout.render</code></td><td>Pipeline cố định, bước con tùy biến ở subclass</td></tr>
+    <tr><td>Repository</td><td><code>BaseRepository[T]</code> + 5 repo con</td><td>Cô lập SQL/mapping khỏi nghiệp vụ</td></tr>
+    <tr><td>Unit of Work</td><td><code>UnitOfWork</code> + transaction ambient (contextvars)</td><td>Nhiều repo ghi chung 1 transaction nguyên tử</td></tr>
+    <tr><td>Strategy</td><td><code>Schedule</code>, <code>BaseCacheManager</code>, <code>BaseDatabaseManager</code>, <code>BaseAuthHandler</code></td><td>Thay hành vi không sửa caller</td></tr>
+    <tr><td>Dependency Injection</td><td><code>ServiceContainer</code> + constructor injection</td><td>Low coupling, dễ test</td></tr>
+    <tr><td>Factory</td><td><code>SettingsFactory</code>, <code>LoggerFactory</code>, page factories</td><td>Tập trung khởi tạo</td></tr>
+    <tr><td>Composite</td><td><code>UiComponent</code> / <code>CompositeComponent</code></td><td>UI lồng nhau tự render</td></tr>
+    <tr><td>Object Pool</td><td><code>ConnectionPool</code></td><td>Giới hạn kết nối + chính sách idle-close</td></tr>
+    <tr><td>Registry</td><td><code>JobRegistry</code>, danh sách controller ở bootstrap</td><td>Điểm mở rộng (Open/Closed)</td></tr>
+    <tr><td>Chain of Responsibility</td><td>Middleware stack</td><td>Cross-cutting concerns cho HTTP</td></tr>
+    <tr><td>Mixin</td><td><code>AuditMixin</code></td><td>Composition: chỉ service ghi dữ liệu mới mang audit</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>6. Mô hình bảo mật</h2>
+  <ul class="checklist">
+    <li>Mật khẩu: PBKDF2-HMAC-SHA256, salt ngẫu nhiên 16 byte, 310.000 vòng lặp, so sánh constant-time.</li>
+    <li>Token: HMAC-SHA256 ký + hết hạn + nhúng <code>token_version</code> — logout/đổi mật khẩu thu hồi NGAY mọi token cũ; Admin page dùng cookie <code>HttpOnly + SameSite=Strict + Secure</code> (production), API client dùng <code>Authorization: Bearer</code>.</li>
+    <li>Tài khoản seed bắt buộc đổi mật khẩu ở lần đăng nhập đầu (<code>must_change_password</code>) trước khi làm bất kỳ thao tác admin nào.</li>
+    <li>Content-Security-Policy với nonce sinh mới mỗi request — chỉ inline style/script do framework đóng dấu mới được chạy; <code>frame-ancestors 'none'</code>.</li>
+    <li>Login endpoint có rate-limit riêng (mặc định 5 lần / 5 phút / IP) chống brute-force.</li>
+    <li>RBAC: <code>RoleGuard</code> — mọi endpoint admin yêu cầu role <code>admin</code>; role đọc từ DB nên đổi quyền có hiệu lực tức thì.</li>
+    <li>SQL: 100% parameterized; cột ORDER BY qua whitelist từng repository (chống injection qua sort).</li>
+    <li>XSS: mọi giá trị động qua <code>esc()</code> / <code>xml_escape</code> — an toàn theo thiết kế.</li>
+    <li>Chống user-enumeration: sai user và sai mật khẩu trả cùng một thông báo.</li>
+    <li>Error sanitization: envelope lỗi chuẩn, không bao giờ lộ stack trace.</li>
+    <li>Rate limit API theo IP; security headers (X-Frame-Options DENY, nosniff, Referrer-Policy).</li>
+    <li>Trang admin <code>noindex, nofollow</code>; container chạy non-root user.</li>
+    <li>Tách module: server public không tồn tại route admin (404 tuyệt đối).</li>
+  </ul>
+</section>
+
+</main>
+<footer class="doc-footer">PyWebFW Documentation · Architecture Design · 2026-06-11</footer>
+</body>
+</html>

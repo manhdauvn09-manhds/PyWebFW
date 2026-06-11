@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SRS — Đặc tả yêu cầu phần mềm — PyWebFW</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html">📘 PyWebFW Docs</a>
+  <a href="architecture-design.html">Architecture</a>
+  <a href="class-design.html">Class Design</a>
+  <a class="active" href="srs.html">SRS</a>
+  <a href="guideline.html">Guideline</a>
+  <a href="user-manual.html">User Manual</a>
+</nav>
+<header class="doc-header">
+  <h1>SRS — Software Requirements Specification</h1>
+  <p>Đặc tả yêu cầu chức năng và phi chức năng của framework PyWebFW, phiên bản 0.1.0.</p>
+</header>
+<main>
+
+<section class="card">
+  <h2>1. Giới thiệu</h2>
+  <h3>1.1 Mục đích</h3>
+  <p>PyWebFW là framework Python hướng đối tượng, tái sử dụng được, cung cấp nền tảng chung cho các hệ thống web cỡ vừa và lớn:
+  trang public cho người dùng cuối, khu vực quản trị, API cho cả hai vùng, và hệ thống tác vụ tự động (scheduler/cron).</p>
+  <h3>1.2 Phạm vi</h3>
+  <p>Một codebase duy nhất, triển khai được theo 2 hình thái: <strong>gộp</strong> (all-in-one, 1 server) hoặc
+  <strong>tách</strong> (FE / Admin / Scheduler chạy container riêng, có thể đặt trên server khác nhau).</p>
+  <h3>1.3 Thuật ngữ</h3>
+  <table>
+    <tr><th>Thuật ngữ</th><th>Định nghĩa</th></tr>
+    <tr><td>Module</td><td>Một vùng chức năng triển khai độc lập: <code>public</code>, <code>admin</code>, <code>scheduler</code> (biến <code>APP_MODULES</code>)</td></tr>
+    <tr><td>RBAC</td><td>Role-Based Access Control — phân quyền theo vai trò (admin / editor / viewer)</td></tr>
+    <tr><td>Audit log</td><td>Nhật ký hành động hệ thống lưu trong DB (bảng <code>audit_logs</code>)</td></tr>
+    <tr><td>Job</td><td>Tác vụ tự động kế thừa <code>BaseSchedulerJob</code>, chạy theo lịch Interval hoặc DailyTime</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>2. Tác nhân &amp; Use Case</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 460" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="aru" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+        <path d="M0,0 L8,3.5 L0,7 z" fill="#64748b"/>
+      </marker>
+    </defs>
+    <!-- system boundary -->
+    <rect x="230" y="20" width="540" height="420" rx="12" fill="#fff" stroke="#94a3b8" stroke-width="1.4"/>
+    <text x="500" y="44" text-anchor="middle" class="t-title">PyWebFW System</text>
+    <!-- visitor actor -->
+    <circle cx="90" cy="100" r="15" class="c-actor"/>
+    <line x1="90" y1="115" x2="90" y2="148" class="edge"/>
+    <line x1="70" y1="126" x2="110" y2="126" class="edge"/>
+    <line x1="90" y1="148" x2="74" y2="172" class="edge"/>
+    <line x1="90" y1="148" x2="106" y2="172" class="edge"/>
+    <text x="90" y="192" text-anchor="middle" class="t-small">Người dùng cuối</text>
+    <!-- admin actor -->
+    <circle cx="910" cy="100" r="15" class="c-actor"/>
+    <line x1="910" y1="115" x2="910" y2="148" class="edge"/>
+    <line x1="890" y1="126" x2="930" y2="126" class="edge"/>
+    <line x1="910" y1="148" x2="894" y2="172" class="edge"/>
+    <line x1="910" y1="148" x2="926" y2="172" class="edge"/>
+    <text x="910" y="192" text-anchor="middle" class="t-small">Quản trị viên</text>
+    <!-- clock actor -->
+    <circle cx="910" cy="330" r="18" class="c-actor"/>
+    <line x1="910" y1="318" x2="910" y2="330" class="edge"/>
+    <line x1="910" y1="330" x2="920" y2="336" class="edge"/>
+    <text x="910" y="368" text-anchor="middle" class="t-small">Đồng hồ hệ thống</text>
+    <!-- public use cases -->
+    <ellipse cx="350" cy="90" rx="100" ry="22" class="c-uc"/>
+    <text x="350" y="95" text-anchor="middle">Xem trang nội dung</text>
+    <ellipse cx="350" cy="145" rx="100" ry="22" class="c-uc"/>
+    <text x="350" y="150" text-anchor="middle">Tìm kiếm</text>
+    <ellipse cx="350" cy="200" rx="100" ry="22" class="c-uc"/>
+    <text x="350" y="205" text-anchor="middle">RSS / Sitemap</text>
+    <ellipse cx="350" cy="255" rx="100" ry="22" class="c-uc"/>
+    <text x="350" y="260" text-anchor="middle">Gọi Public API</text>
+    <line x1="110" y1="120" x2="248" y2="95" class="edge"/>
+    <line x1="110" y1="128" x2="248" y2="148" class="edge"/>
+    <line x1="110" y1="136" x2="248" y2="198" class="edge"/>
+    <line x1="110" y1="144" x2="248" y2="250" class="edge"/>
+    <!-- admin use cases -->
+    <ellipse cx="640" cy="90" rx="95" ry="22" class="c-uc"/>
+    <text x="640" y="95" text-anchor="middle">Đăng nhập / RBAC</text>
+    <ellipse cx="640" cy="145" rx="95" ry="22" class="c-uc"/>
+    <text x="640" y="150" text-anchor="middle">Quản lý User</text>
+    <ellipse cx="640" cy="200" rx="95" ry="22" class="c-uc"/>
+    <text x="640" y="205" text-anchor="middle">Quản lý Menu</text>
+    <ellipse cx="640" cy="255" rx="95" ry="22" class="c-uc"/>
+    <text x="640" y="260" text-anchor="middle">Xem Log / Dashboard</text>
+    <ellipse cx="640" cy="310" rx="95" ry="22" class="c-uc"/>
+    <text x="640" y="315" text-anchor="middle">Quản lý DB Connection</text>
+    <line x1="890" y1="120" x2="737" y2="95" class="edge"/>
+    <line x1="890" y1="128" x2="737" y2="148" class="edge"/>
+    <line x1="890" y1="136" x2="737" y2="200" class="edge"/>
+    <line x1="890" y1="144" x2="737" y2="255" class="edge"/>
+    <line x1="890" y1="152" x2="737" y2="308" class="edge"/>
+    <!-- scheduler use cases -->
+    <ellipse cx="500" cy="385" rx="130" ry="24" class="c-uc"/>
+    <text x="500" y="382" text-anchor="middle">Chạy job tự động</text>
+    <text x="500" y="398" text-anchor="middle" class="t-small">health · cleanup · warmup · optimize</text>
+    <line x1="892" y1="335" x2="632" y2="385" class="edge"/>
+    <!-- include -->
+    <line x1="640" y1="123" x2="640" y2="112" class="edge dashed"/>
+    <text x="745" y="125" class="t-small">«include» mọi UC admin</text>
+  </svg>
+  <figcaption>Hình 2.1 — Use case tổng quan. Mọi use case vùng admin đều «include» Đăng nhập/RBAC.</figcaption>
+  </figure>
+  <table>
+    <tr><th>Tác nhân</th><th>Mô tả</th></tr>
+    <tr><td>Người dùng cuối (Visitor)</td><td>Truy cập trang public, tìm kiếm, đọc nội dung — không cần tài khoản</td></tr>
+    <tr><td>Quản trị viên (Admin)</td><td>Tài khoản role <code>admin</code>; quản lý dữ liệu hệ thống qua trang/API admin</td></tr>
+    <tr><td>Đồng hồ hệ thống</td><td>Tác nhân thời gian kích hoạt SchedulerEngine theo lịch</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>3. Yêu cầu chức năng (FR)</h2>
+  <h3>3.1 Public Front-End</h3>
+  <table>
+    <tr><th>ID</th><th>Yêu cầu</th><th>Ưu tiên</th></tr>
+    <tr><td>FR-PUB-01</td><td>Hiển thị các trang: Home, About, Introduction, Contact, Privacy Policy, Terms, Editorial Policy, Sitemap, Search</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-PUB-02</td><td>Mọi trang dùng chung Header, Navigation (menu từ DB), Footer, Breadcrumbs, SEO metadata qua layout/component tái sử dụng</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-PUB-03</td><td>Tìm kiếm nội dung published, phân trang, query tối thiểu 2 ký tự, kết quả escape an toàn</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-PUB-04</td><td>Xuất RSS 2.0 (<code>/rss</code>) và sitemap XML (<code>/sitemap.xml</code>)</td><td><span class="badge amber">Cao</span></td></tr>
+    <tr><td>FR-PUB-05</td><td>Trang nội dung lấy từ bảng <code>contents</code> theo slug (CMS-style), có cache TTL</td><td><span class="badge amber">Cao</span></td></tr>
+  </table>
+  <h3>3.2 Public API</h3>
+  <table>
+    <tr><th>ID</th><th>Yêu cầu</th><th>Endpoint</th></tr>
+    <tr><td>FR-PAPI-01</td><td>Lấy menu public</td><td><code>GET /api/public/menus</code></td></tr>
+    <tr><td>FR-PAPI-02</td><td>Lấy nội dung theo slug (404 chuẩn hóa nếu không có)</td><td><code>GET /api/public/content/{slug}</code></td></tr>
+    <tr><td>FR-PAPI-03</td><td>Tìm kiếm có phân trang/giới hạn size</td><td><code>GET /api/public/search?q=&amp;page=&amp;size=</code></td></tr>
+    <tr><td>FR-PAPI-04</td><td>Danh sách sitemap entries dạng JSON</td><td><code>GET /api/public/sitemap</code></td></tr>
+  </table>
+  <h3>3.3 Admin</h3>
+  <table>
+    <tr><th>ID</th><th>Yêu cầu</th><th>Ưu tiên</th></tr>
+    <tr><td>FR-ADM-01</td><td>Đăng nhập bằng username/password; phát hành token ký HMAC có hạn; cookie HttpOnly SameSite=Strict cho trang admin</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-ADM-02</td><td>Màn hình: Admin Home, Dashboard (metrics + recent activity), User Management, Menu Management, Log Management, DB Connection Management</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-ADM-03</td><td>RBAC: chỉ role <code>admin</code> vào được khu vực admin; truy cập ẩn danh redirect về login</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-ADM-04</td><td>CRUD user: validate nghiệp vụ, chống trùng username/email, không cho tự xóa chính mình, không bao giờ trả về password hash</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-ADM-05</td><td>Mọi hành động ghi dữ liệu (create/update/delete, login) đều ghi audit log kèm actor</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-ADM-06</td><td>Khung dễ thêm màn hình quản trị mới (subclass <code>AdminPage</code> + 1 route)</td><td><span class="badge amber">Cao</span></td></tr>
+  </table>
+  <h3>3.4 Admin API</h3>
+  <table>
+    <tr><th>ID</th><th>Resource</th><th>Endpoint chính</th></tr>
+    <tr><td>FR-AAPI-01</td><td>Auth</td><td><code>POST /api/admin/auth/login</code> · <code>POST /logout</code> · <code>GET /me</code></td></tr>
+    <tr><td>FR-AAPI-02</td><td>Users</td><td><code>GET/POST /api/admin/users</code> · <code>GET/PUT/DELETE /users/{id}</code> (paging, sort whitelist)</td></tr>
+    <tr><td>FR-AAPI-03</td><td>Menus</td><td><code>GET/POST /api/admin/menus</code> · <code>PUT/DELETE /menus/{id}</code></td></tr>
+    <tr><td>FR-AAPI-04</td><td>Logs</td><td><code>GET /api/admin/logs?level=</code></td></tr>
+    <tr><td>FR-AAPI-05</td><td>Dashboard</td><td><code>GET /api/admin/dashboard/metrics</code></td></tr>
+    <tr><td>FR-AAPI-06</td><td>System</td><td><code>GET /system/health</code> · CRUD <code>/system/db-connections</code> (DSN được mask)</td></tr>
+  </table>
+  <h3>3.5 Scheduler</h3>
+  <table>
+    <tr><th>ID</th><th>Job</th><th>Lịch mặc định</th><th>Retry</th></tr>
+    <tr><td>FR-SCH-01</td><td>ServerHealthCheckJob — uptime, dung lượng đĩa</td><td>60s</td><td>2 lần / 1s</td></tr>
+    <tr><td>FR-SCH-02</td><td>DatabaseHealthCheckJob — SELECT 1, latency, pool stats</td><td>60s</td><td>3 lần / 2s</td></tr>
+    <tr><td>FR-SCH-03</td><td>LogCleanupJob — xóa audit log quá 30 ngày</td><td>3600s</td><td>—</td></tr>
+    <tr><td>FR-SCH-04</td><td>CacheWarmupJob — purge entry hết hạn + warm menu</td><td>240s</td><td>—</td></tr>
+    <tr><td>FR-SCH-05</td><td>DatabaseOptimizeJob — ANALYZE / PRAGMA optimize</td><td>03:30 hằng ngày</td><td>—</td></tr>
+    <tr><td>FR-SCH-06</td><td>IdleConnectionCloserJob — đóng kết nối idle quá timeout cấu hình</td><td>60s</td><td>—</td></tr>
+    <tr><td>FR-SCH-07</td><td>Mỗi lần chạy job ghi JobResult (status, duration, attempts) vào audit log; engine có <code>status_report</code> và <code>run_job_now()</code></td><td colspan="2">—</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>4. Yêu cầu phi chức năng (NFR)</h2>
+  <table>
+    <tr><th>ID</th><th>Nhóm</th><th>Yêu cầu</th></tr>
+    <tr><td>NFR-01</td><td>Kiến trúc</td><td>OOP-first; phụ thuộc giữa các tầng chỉ qua ABC; composition root duy nhất</td></tr>
+    <tr><td>NFR-02</td><td>Triển khai</td><td>1 Docker image; <code>APP_MODULES</code> chọn vai trò; module không bật thì route không tồn tại (404)</td></tr>
+    <tr><td>NFR-03</td><td>Bảo mật</td><td>PBKDF2 310k vòng; token HMAC có hạn; SQL parameterized; XSS escape; rate limit; security headers; error sanitization</td></tr>
+    <tr><td>NFR-04</td><td>Quan sát</td><td>Log JSON có cấu trúc; <code>/healthz</code> ở mọi mode; audit trail trong DB</td></tr>
+    <tr><td>NFR-05</td><td>Hiệu năng</td><td>Connection pool giới hạn + idle-close; cache read-through TTL; phân trang bắt buộc (size ≤ 100)</td></tr>
+    <tr><td>NFR-06</td><td>Khả mở rộng</td><td>Thêm page/API/job/repo = thêm subclass + 1 dòng đăng ký; không sửa code cũ</td></tr>
+    <tr><td>NFR-07</td><td>Kiểm thử</td><td>Test end-to-end qua HTTP thật; mọi thay đổi phải giữ test xanh</td></tr>
+    <tr><td>NFR-08</td><td>Cấu hình</td><td>Toàn bộ qua env/.env; production từ chối chạy với secret mặc định</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>5. Mô hình dữ liệu</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 330" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="are" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+        <path d="M0,0 L8,3.5 L0,7 z" fill="#64748b"/>
+      </marker>
+    </defs>
+    <!-- users -->
+    <rect x="30" y="30" width="200" height="130" rx="8" class="c-infra"/>
+    <rect x="30" y="30" width="200" height="28" rx="8" fill="#2563eb"/>
+    <text x="130" y="49" text-anchor="middle" class="t-white">users</text>
+    <text x="42" y="78" class="t-small">id PK · username UQ · email UQ</text>
+    <text x="42" y="96" class="t-small">password_hash (PBKDF2)</text>
+    <text x="42" y="114" class="t-small">role (admin|editor|viewer)</text>
+    <text x="42" y="132" class="t-small">is_active · created_at · updated_at</text>
+    <!-- menus -->
+    <rect x="270" y="30" width="200" height="130" rx="8" class="c-infra"/>
+    <rect x="270" y="30" width="200" height="28" rx="8" fill="#16a34a"/>
+    <text x="370" y="49" text-anchor="middle" class="t-white">menus</text>
+    <text x="282" y="78" class="t-small">id PK · title · url</text>
+    <text x="282" y="96" class="t-small">area (public|admin) · position</text>
+    <text x="282" y="114" class="t-small">parent_id FK → menus.id</text>
+    <text x="282" y="132" class="t-small">is_active · timestamps</text>
+    <path d="M 470 70 C 510 70 510 110 470 110" class="edge" marker-end="url(#are)"/>
+    <text x="520" y="94" class="t-small">self-ref (cây menu)</text>
+    <!-- contents -->
+    <rect x="30" y="190" width="200" height="120" rx="8" class="c-infra"/>
+    <rect x="30" y="190" width="200" height="28" rx="8" fill="#ca8a04"/>
+    <text x="130" y="209" text-anchor="middle" class="t-white">contents</text>
+    <text x="42" y="238" class="t-small">id PK · slug UQ · title</text>
+    <text x="42" y="256" class="t-small">summary · body</text>
+    <text x="42" y="274" class="t-small">seo_title · seo_description</text>
+    <text x="42" y="292" class="t-small">is_published · timestamps</text>
+    <!-- audit_logs -->
+    <rect x="270" y="190" width="210" height="120" rx="8" class="c-infra"/>
+    <rect x="270" y="190" width="210" height="28" rx="8" fill="#a21caf"/>
+    <text x="375" y="209" text-anchor="middle" class="t-white">audit_logs</text>
+    <text x="282" y="238" class="t-small">id PK · actor · action · target</text>
+    <text x="282" y="256" class="t-small">detail · level (info|warning|error)</text>
+    <text x="282" y="274" class="t-small">created_at (index)</text>
+    <text x="282" y="292" class="t-small">ghi bởi: services · scheduler · auth</text>
+    <!-- db_connections -->
+    <rect x="540" y="190" width="220" height="120" rx="8" class="c-infra"/>
+    <rect x="540" y="190" width="220" height="28" rx="8" fill="#dc2626"/>
+    <text x="650" y="209" text-anchor="middle" class="t-white">db_connections</text>
+    <text x="552" y="238" class="t-small">id PK · name UQ · driver · dsn</text>
+    <text x="552" y="256" class="t-small">pool_size · idle_timeout_seconds</text>
+    <text x="552" y="274" class="t-small">is_default · timestamps</text>
+    <text x="552" y="292" class="t-small">DSN mask khi trả ra API</text>
+    <!-- logical links -->
+    <line x1="230" y1="95" x2="330" y2="230" class="edge dashed"/>
+    <text x="232" y="180" class="t-small">actor = username (logic)</text>
+    <!-- indexes note -->
+    <rect x="540" y="30" width="430" height="120" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+    <text x="560" y="56" class="t-title">Index</text>
+    <text x="560" y="80" class="t-small">idx_menus_area_pos (area, position) — render menu nhanh</text>
+    <text x="560" y="100" class="t-small">idx_audit_created (created_at) — cleanup &amp; trang log</text>
+    <text x="560" y="120" class="t-small">idx_contents_published (is_published, slug) — public read path</text>
+  </svg>
+  <figcaption>Hình 5.1 — Mô hình dữ liệu: 5 bảng độc lập cao (low coupling), liên kết logic qua actor/username.</figcaption>
+  </figure>
+</section>
+
+<section class="card">
+  <h2>6. Ràng buộc &amp; giả định</h2>
+  <ul class="checklist">
+    <li>Python ≥ 3.11; Docker image dùng python:3.12-slim, chạy non-root.</li>
+    <li>SQLite trên shared volume chỉ dùng khi các container cùng 1 host; tách nhiều máy phải chuyển sang DB server (implement <code>BaseDatabaseManager</code>).</li>
+    <li>Tài khoản seed <code>admin / ChangeMe!123</code> chỉ cho lần boot đầu — bắt buộc đổi ngay.</li>
+    <li>Production bắt buộc đặt <code>SECURITY_SECRET_KEY</code>; thiếu sẽ từ chối khởi động.</li>
+    <li>Cache in-memory là per-process; nhiều instance cần Redis để đồng bộ invalidation.</li>
+  </ul>
+</section>
+
+</main>
+<footer class="doc-footer">PyWebFW Documentation · SRS v0.1.0 · 2026-06-11</footer>
+</body>
+</html>
