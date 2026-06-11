@@ -61,6 +61,32 @@ _TABLES: dict[str, str] = {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )""",
+    "system_settings": """
+        CREATE TABLE IF NOT EXISTS system_settings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL UNIQUE,
+            value TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+    "traffic_stats": """
+        CREATE TABLE IF NOT EXISTS traffic_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day TEXT NOT NULL,
+            path TEXT NOT NULL,
+            hits INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(day, path)
+        )""",
+    "traffic_daily": """
+        CREATE TABLE IF NOT EXISTS traffic_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day TEXT NOT NULL UNIQUE,
+            uniques INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
     "db_connections": """
         CREATE TABLE IF NOT EXISTS db_connections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,6 +105,7 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_menus_area_pos ON menus(area, position)",
     "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_contents_published ON contents(is_published, slug)",
+    "CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_stats(day)",
 ]
 
 # Columns added after the initial release: (table, column, DDL fragment).
@@ -121,7 +148,8 @@ _SEED_PUBLIC_MENU = [
 ]
 _SEED_ADMIN_MENU = [
     ("Dashboard", "/admin"), ("Users", "/admin/users"), ("Menus", "/admin/menus"),
-    ("Contents", "/admin/contents"), ("Logs", "/admin/logs"),
+    ("Contents", "/admin/contents"), ("Jobs", "/admin/jobs"),
+    ("Settings", "/admin/settings"), ("Logs", "/admin/logs"),
     ("DB Connections", "/admin/db-connections"),
 ]
 
@@ -216,3 +244,10 @@ class SchemaInitializer:
                     "INSERT INTO contents (slug, title, summary, body, seo_title, seo_description,"
                     " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (slug, title, summary, body, title, summary, now, now))
+        row = self._db.fetch_one("SELECT COUNT(*) AS n FROM system_settings")
+        if row and row["n"] == 0:
+            from app.services.site_settings_service import KNOWN_SETTINGS
+            for key, default in KNOWN_SETTINGS.items():
+                self._db.execute(
+                    "INSERT INTO system_settings (key, value, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?)", (key, default, now, now))

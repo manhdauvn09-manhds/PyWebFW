@@ -162,6 +162,44 @@ class SearchFormWidget(UiComponent):
                 f'placeholder="Search..." minlength="2"><button>Search</button></form>')
 
 
+class BarChartComponent(UiComponent):
+    """Server-rendered SVG bar chart — no JS, CSP-friendly."""
+
+    def __init__(self, series: Sequence[tuple[str, int]], *, title: str = "",
+                 width: int = 640, height: int = 180) -> None:
+        self._series = list(series)
+        self._title = title
+        self._width = width
+        self._height = height
+
+    def render(self) -> str:
+        if not self._series:
+            return f"<p>{esc(self._title)}: no data yet</p>"
+        peak = max(value for _, value in self._series) or 1
+        plot_h = self._height - 40
+        bar_zone = self._width / len(self._series)
+        bar_w = min(48, bar_zone * 0.6)
+        bars = []
+        for index, (label, value) in enumerate(self._series):
+            bar_h = max(2, round(plot_h * value / peak))
+            x = round(index * bar_zone + (bar_zone - bar_w) / 2)
+            y = plot_h - bar_h + 16
+            cx = round(x + bar_w / 2)
+            bars.append(
+                f'<rect x="{x}" y="{y}" width="{round(bar_w)}" height="{bar_h}"'
+                ' rx="3" fill="#2563eb"></rect>'
+                f'<text x="{cx}" y="{y - 4}" text-anchor="middle"'
+                f' font-size="11">{esc(value)}</text>'
+                f'<text x="{cx}" y="{plot_h + 32}" text-anchor="middle"'
+                f' font-size="10" fill="#6b7280">{esc(label)}</text>'
+            )
+        title = (f'<h3>{esc(self._title)}</h3>' if self._title else "")
+        return (f'{title}<svg viewBox="0 0 {self._width} {self._height}"'
+                f' width="{self._width}" height="{self._height}"'
+                ' role="img" xmlns="http://www.w3.org/2000/svg">'
+                + "".join(bars) + "</svg>")
+
+
 class StatCardWidget(UiComponent):
     def __init__(self, label: str, value: object) -> None:
         self._label = label

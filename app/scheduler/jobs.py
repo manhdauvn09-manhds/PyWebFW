@@ -18,6 +18,7 @@ from app.scheduler.base import (
 )
 from app.services.menu_service import MenuService
 from app.services.system_service import ServerHealthChecker
+from app.services.traffic_service import TrafficService
 
 
 class ServerHealthCheckJob(BaseSchedulerJob):
@@ -101,6 +102,23 @@ class DatabaseOptimizeJob(BaseSchedulerJob):
     def run(self) -> str:
         report = self._db.optimize()
         return f"optimize finished in {report['duration_ms']}ms"
+
+
+class TrafficFlushJob(BaseSchedulerJob):
+    """Persists pending in-memory traffic counters. The middleware also
+    flushes opportunistically; this job guarantees a flush even on idle
+    processes (relevant for the all-in-one deployment)."""
+
+    name = "traffic-flush"
+    schedule = IntervalSchedule(60)
+
+    def __init__(self, traffic: "TrafficService") -> None:
+        super().__init__()
+        self._traffic = traffic
+
+    def run(self) -> str:
+        written = self._traffic.maybe_flush(force=True)
+        return f"flushed {written} traffic row(s)"
 
 
 class DatabaseBackupJob(BaseSchedulerJob):

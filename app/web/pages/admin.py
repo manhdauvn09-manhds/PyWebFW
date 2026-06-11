@@ -11,13 +11,21 @@ from __future__ import annotations
 from app.core.exceptions import NotFoundError
 from app.core.pagination import PageRequest
 from app.domain.models import ContentItem
+from app.scheduler.engine import SchedulerEngine
 from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
 from app.services.menu_service import MenuService
+from app.services.site_settings_service import KNOWN_SETTINGS, SiteSettingsService
 from app.services.system_service import SystemService
 from app.services.user_service import UserService
 from app.repositories.log_repository import LogRepository
-from app.web.components import SeoMeta, StatCardWidget, TableComponent, esc
+from app.web.components import (
+    BarChartComponent,
+    SeoMeta,
+    StatCardWidget,
+    TableComponent,
+    esc,
+)
 from app.web.pages.base import AdminPage, BasePage, PageContext
 from app.web.layouts import AdminLayout, BaseLayout
 
@@ -149,9 +157,20 @@ class DashboardPage(AdminPage):
 
     def build_content(self) -> str:
         metrics = self._dashboard.metrics()
-        cards = "".join(
+        traffic = metrics["traffic"]
+        cards = StatCardWidget("Online Now", traffic["online"]).render()
+        cards += StatCardWidget("Views Today", traffic["today_hits"]).render()
+        cards += "".join(
             StatCardWidget(label.replace("_", " ").title(), value).render()
             for label, value in metrics["counts"].items()
+        )
+        chart = BarChartComponent(
+            [(row["day"][5:], row["hits"]) for row in traffic["series"]],
+            title="Page views — last 7 days",
+        )
+        top_pages = TableComponent(
+            ["Path", "Hits (7d)"],
+            [(row["path"], row["hits"]) for row in traffic["top_pages"]],
         )
         db = metrics["database"]
         health = ("OK" if db.get("healthy") else "DOWN") + f' ({db.get("latency_ms", "?")} ms)'
@@ -161,6 +180,8 @@ class DashboardPage(AdminPage):
              for log in metrics["recent_logs"]],
         )
         return (f"<h1>Dashboard</h1><div>{cards}</div>"
+                f"{chart.render()}"
+                f"<h2>Top pages</h2>{top_pages.render()}"
                 f"<p>Database: <strong>{esc(health)}</strong> — "
                 f"Cache entries: {esc(metrics['cache']['entries'])}</p>"
                 f"<h2>Recent activity</h2>{recent.render()}")
@@ -322,6 +343,118 @@ class ContentManagementPage(AdminPage):
             '<div class="form-message" role="alert"></div></form>'
             f"{script}"
         )
+
+
+_JOBS_SCRIPT = """
+<script nonce="__NONCE__">
+document.querySelectorAll('button[data-job]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Running...';
+    await fetch(`/api/admin/system/jobs/${btn.dataset.job}/run`, {
+      method: 'POST', headers: {'X-Requested-With': 'fetch'},
+    });
+    window.location.reload();
+  });
+});
+</script>
+"""
+
+
+class JobsMonitorPage(AdminPage):
+    """Scheduler observability: every job, its schedule, last result, and a
+    manual trigger. Shows a notice when this process has no scheduler module."""
+
+    def __init__(self, ctx: PageContext, engine: SchedulerEngine | None) -> None:
+        super().__init__(ctx)
+        self._engine = engine
+
+    @property
+    def title(self) -> str:
+        return "Scheduled Jobs"
+
+    def build_content(self) -> str:
+        if self._engine is None:
+            return ("<h1>Scheduled Jobs</h1><p>The scheduler module is not "
+                    "running in this process (see <code>APP_MODULES</code>). "
+                    "Job results are visible in the audit log.</p>")
+        rows = []
+        for entry in self._engine.status_report:
+            last = entry["last_result"]
+            if last:
+                status = last["status"]
+                detail = (f'{last["duration_ms"]} ms · attempts {last["attempts"]} · '
+                          f'{last["message"] or last["error"]}')
+                started = last["started_at"]
+            else:
+                status, detail, started = "—", "not run yet", "—"
+            rows.append(
+                f"<tr><td>{esc(entry['job'])}</td><td>{esc(entry['schedule'])}</td>"
+                f"<td>{esc(status)}</td><td>{esc(started)}</td><td>{esc(detail)}</td>"
+                f'<td><button data-job="{esc(entry["job"])}">Run now</button></td></tr>'
+            )
+        script = _JOBS_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
+        return ("<h1>Scheduled Jobs</h1>"
+                '<table class="data-table"><thead><tr><th>Job</th><th>Schedule</th>'
+                "<th>Last status</th><th>Started</th><th>Detail</th><th></th></tr></thead>"
+                f'<tbody>{"".join(rows)}</tbody></table>{script}')
+
+
+_SETTINGS_SCRIPT = """
+<script nonce="__NONCE__">
+const form = document.getElementById('settings-form');
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = form.querySelector('.form-message');
+  const values = {};
+  form.querySelectorAll('[data-setting]').forEach((el) => {
+    values[el.dataset.setting] = el.type === 'checkbox'
+      ? (el.checked ? '1' : '0') : el.value;
+  });
+  const res = await fetch('/api/admin/settings', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+    body: JSON.stringify({values}),
+  });
+  const result = await res.json();
+  message.textContent = result.success
+    ? 'Saved.' : (result.error?.message || 'Save failed');
+});
+</script>
+"""
+
+
+class SettingsPage(AdminPage):
+    """Runtime system configuration — values apply without redeploying."""
+
+    def __init__(self, ctx: PageContext, site_settings: SiteSettingsService) -> None:
+        super().__init__(ctx)
+        self._site_settings = site_settings
+
+    @property
+    def title(self) -> str:
+        return "System Settings"
+
+    def build_content(self) -> str:
+        values = self._site_settings.all()
+        fields = []
+        for key in KNOWN_SETTINGS:
+            label = key.replace("_", " ").title()
+            if key == "maintenance_mode":
+                checked = " checked" if values[key] == "1" else ""
+                fields.append(
+                    f'<label><input type="checkbox" data-setting="{esc(key)}"{checked}>'
+                    f" {label} <small>(public site answers 503 while enabled)</small></label>")
+            else:
+                fields.append(
+                    f'<label>{label}<input data-setting="{esc(key)}"'
+                    f' value="{esc(values[key])}"></label>')
+        script = _SETTINGS_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
+        return ("<h1>System Settings</h1>"
+                '<form id="settings-form" class="app-form">'
+                + "".join(fields) +
+                '<button type="submit">Save settings</button>'
+                '<div class="form-message" role="alert"></div></form>'
+                f"{script}")
 
 
 class DbConnectionManagementPage(AdminPage):

@@ -1,10 +1,12 @@
 ﻿"""HTTP middleware (Chain of Responsibility via Starlette's middleware stack)."""
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import secrets
 import time
 
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
@@ -12,6 +14,8 @@ from starlette.responses import Response
 from app.core.logging import LoggerFactory
 from app.core.responses import ApiResponse
 from app.core.security import SlidingWindowRateLimiter
+from app.services.site_settings_service import SiteSettingsService
+from app.services.traffic_service import TrafficService, today_utc
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -71,6 +75,57 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     status_code=429,
                     content=ApiResponse.fail("RATE_LIMITED", "Too many requests").to_dict(),
+                )
+        return await call_next(request)
+
+
+class TrafficTrackingMiddleware(BaseHTTPMiddleware):
+    """Counts public page views + tracks online presence — memory only on the
+    request path; batched flushes persist the counters (see TrafficService)."""
+
+    _EXCLUDED_PREFIXES = ("/api/", "/admin", "/healthz", "/favicon",
+                          "/robots.txt", "/sitemap.xml", "/rss", "/openapi.json")
+
+    def __init__(self, app, traffic: TrafficService) -> None:
+        super().__init__(app)
+        self._traffic = traffic
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        response = await call_next(request)
+        if (request.method == "GET" and response.status_code < 400
+                and not request.url.path.startswith(self._EXCLUDED_PREFIXES)):
+            ip = request.client.host if request.client else "unknown"
+            agent = request.headers.get("user-agent", "")
+            # Daily-rotating anonymous visitor hash — raw IPs are never stored.
+            visitor = hashlib.sha256(
+                f"{ip}|{agent}|{today_utc()}".encode()).hexdigest()[:16]
+            self._traffic.record_request(request.url.path, visitor)
+            await asyncio.to_thread(self._traffic.maybe_flush)
+        return response
+
+
+class MaintenanceMiddleware(BaseHTTPMiddleware):
+    """When the maintenance_mode setting is on, the public site answers 503;
+    the admin area and health probes stay reachable so it can be turned off."""
+
+    _EXEMPT_PREFIXES = ("/admin", "/api/admin", "/healthz")
+
+    def __init__(self, app, site_settings: SiteSettingsService) -> None:
+        super().__init__(app)
+        self._settings = site_settings
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if not request.url.path.startswith(self._EXEMPT_PREFIXES):
+            # Read-through cache (30s TTL) — no DB hit on the hot path.
+            if await asyncio.to_thread(self._settings.is_maintenance):
+                from app.web.error_pages import render_error_page
+                nonce = getattr(request.state, "csp_nonce", "")
+                return HTMLResponse(
+                    render_error_page(503, "We are doing scheduled maintenance. "
+                                      "Please check back shortly.",
+                                      nonce=nonce, show_home_link=False),
+                    status_code=503,
+                    headers={"Retry-After": "300"},
                 )
         return await call_next(request)
 

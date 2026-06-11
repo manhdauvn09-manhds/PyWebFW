@@ -17,10 +17,12 @@ from app.core.routing import BaseController
 from app.domain.models import MenuArea, Role
 from app.infrastructure.auth.manager import BaseAuthHandler, CurrentUser
 from app.repositories.log_repository import LogRepository
+from app.scheduler.engine import SchedulerEngine
 from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
 from app.services.menu_service import MenuService
 from app.services.search_service import SearchService
+from app.services.site_settings_service import SiteSettingsService
 from app.services.system_service import SystemService
 from app.services.user_service import UserService
 from app.web.pages.admin import (
@@ -30,8 +32,10 @@ from app.web.pages.admin import (
     ContentManagementPage,
     DashboardPage,
     DbConnectionManagementPage,
+    JobsMonitorPage,
     LogManagementPage,
     MenuManagementPage,
+    SettingsPage,
     UserManagementPage,
 )
 from app.web.pages.base import BasePage, PageContext
@@ -100,6 +104,16 @@ class PublicWebController(BaseController):
         def sitemap_xml() -> Response:
             return Response(content=self._build_sitemap_xml(), media_type="application/xml")
 
+        @router.get("/robots.txt", include_in_schema=False)
+        def robots(request: Request) -> Response:
+            lines = [
+                "User-agent: *",
+                "Disallow: /admin",
+                "Disallow: /api/",
+                f"Sitemap: {str(request.base_url).rstrip('/')}/sitemap.xml",
+            ]
+            return Response(content="\n".join(lines) + "\n", media_type="text/plain")
+
     def _add_page_route(self, router: APIRouter, path: str, factory: PageFactory) -> None:
         # Bind per-route via default args (avoids the closure-in-loop pitfall).
         def handler(request: Request, factory: PageFactory = factory) -> HTMLResponse:
@@ -143,6 +157,8 @@ class AdminWebController(BaseController):
         system: SystemService,
         logs: LogRepository,
         contents: ContentService,
+        site_settings: SiteSettingsService,
+        engine: SchedulerEngine | None = None,
     ) -> None:
         self._settings = settings
         self._auth = auth_handler
@@ -152,6 +168,8 @@ class AdminWebController(BaseController):
         self._system = system
         self._logs = logs
         self._contents = contents
+        self._site_settings = site_settings
+        self._engine = engine
 
     def _context(self, request: Request, user: CurrentUser | None) -> PageContext:
         return PageContext(
@@ -185,6 +203,8 @@ class AdminWebController(BaseController):
             "/users": lambda ctx: UserManagementPage(ctx, self._users),
             "/menus": lambda ctx: MenuManagementPage(ctx, self._menus),
             "/contents": lambda ctx: ContentManagementPage(ctx, self._contents),
+            "/jobs": lambda ctx: JobsMonitorPage(ctx, self._engine),
+            "/settings": lambda ctx: SettingsPage(ctx, self._site_settings),
             "/logs": lambda ctx: LogManagementPage(ctx, self._logs),
             "/db-connections": lambda ctx: DbConnectionManagementPage(ctx, self._system),
         }

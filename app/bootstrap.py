@@ -13,12 +13,16 @@ from typing import AsyncIterator
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from app.api.admin_api import (
     AdminAuthApiController,
     AdminContentApiController,
     AdminDashboardApiController,
     AdminLogApiController,
     AdminMenuApiController,
+    AdminSettingsApiController,
     AdminSystemApiController,
     AdminUserApiController,
 )
@@ -34,9 +38,11 @@ from app.core.container import ServiceContainer
 from app.core.exceptions import AuthenticationError, FrameworkError
 from app.core.logging import LoggerFactory
 from app.core.middleware import (
+    MaintenanceMiddleware,
     RateLimitMiddleware,
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
+    TrafficTrackingMiddleware,
 )
 from app.core.responses import ApiResponse
 from app.core.routing import BaseController
@@ -49,6 +55,8 @@ from app.repositories.content_repository import ContentRepository
 from app.repositories.db_connection_repository import DbConnectionRepository
 from app.repositories.log_repository import LogRepository
 from app.repositories.menu_repository import MenuRepository
+from app.repositories.setting_repository import SettingRepository
+from app.repositories.traffic_repository import TrafficRepository
 from app.repositories.user_repository import UserRepository
 from app.scheduler.engine import JobRegistry, SchedulerEngine
 from app.scheduler.jobs import (
@@ -59,19 +67,23 @@ from app.scheduler.jobs import (
     IdleConnectionCloserJob,
     LogCleanupJob,
     ServerHealthCheckJob,
+    TrafficFlushJob,
 )
 from app.services.auth_service import AuthService
 from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
 from app.services.menu_service import MenuService
 from app.services.search_service import SearchService
+from app.services.site_settings_service import SiteSettingsService
 from app.services.system_service import (
     DatabaseHealthChecker,
     ServerHealthChecker,
     SystemService,
 )
+from app.services.traffic_service import TrafficService
 from app.services.user_service import UserService
 from app.web.controllers import AdminWebController, PublicWebController
+from app.web.error_pages import render_error_page
 
 
 class ApplicationBuilder:
@@ -94,7 +106,7 @@ class ApplicationBuilder:
         app.state.scheduler_engine = engine
         self._register_middleware(app)
         self._register_error_handlers(app)
-        self._register_controllers(app)
+        self._register_controllers(app, engine)
         self._register_health_endpoint(app, engine)
         return app
 
@@ -128,7 +140,8 @@ class ApplicationBuilder:
     def _register_repositories(self) -> None:
         c = self._container
         for repo_type in (UserRepository, MenuRepository, LogRepository,
-                          ContentRepository, DbConnectionRepository):
+                          ContentRepository, DbConnectionRepository,
+                          SettingRepository, TrafficRepository):
             c.register_singleton(
                 repo_type,
                 lambda c, rt=repo_type: rt(c.resolve(BaseDatabaseManager)))
@@ -148,10 +161,15 @@ class ApplicationBuilder:
             c.resolve(LogRepository)))
         c.register_singleton(SearchService, lambda c: SearchService(
             c.resolve(ContentRepository)))
+        c.register_singleton(TrafficService, lambda c: TrafficService(
+            c.resolve(TrafficRepository)))
+        c.register_singleton(SiteSettingsService, lambda c: SiteSettingsService(
+            c.resolve(SettingRepository), c.resolve(BaseCacheManager),
+            c.resolve(LogRepository)))
         c.register_singleton(DashboardService, lambda c: DashboardService(
             c.resolve(BaseDatabaseManager), c.resolve(UserRepository),
             c.resolve(LogRepository), c.resolve(ContentRepository),
-            c.resolve(BaseCacheManager)))
+            c.resolve(BaseCacheManager), c.resolve(TrafficService)))
         c.register_instance(ServerHealthChecker, ServerHealthChecker(started_at=time.time()))
         c.register_singleton(SystemService, lambda c: SystemService(
             c.resolve(DbConnectionRepository), c.resolve(LogRepository),
@@ -180,6 +198,7 @@ class ApplicationBuilder:
         registry.register(DatabaseHealthCheckJob(db))
         registry.register(LogCleanupJob(c.resolve(LogRepository)))
         registry.register(CacheWarmupJob(c.resolve(MenuService), cache))
+        registry.register(TrafficFlushJob(c.resolve(TrafficService)))
         registry.register(DatabaseOptimizeJob(db))
         registry.register(DatabaseBackupJob(db, self._settings.database.path))
         registry.register(IdleConnectionCloserJob(
@@ -207,14 +226,26 @@ class ApplicationBuilder:
         rl = self._settings.rate_limit
         limiter = SlidingWindowRateLimiter(rl.max_requests, rl.window_seconds)
         login_limiter = SlidingWindowRateLimiter(rl.login_max_requests, rl.login_window_seconds)
+        # add_middleware: last added = outermost. Traffic is innermost so it
+        # never counts rate-limited or maintenance responses.
+        app.add_middleware(TrafficTrackingMiddleware,
+                           traffic=self._container.resolve(TrafficService))
+        app.add_middleware(MaintenanceMiddleware,
+                           site_settings=self._container.resolve(SiteSettingsService))
         app.add_middleware(RequestLoggingMiddleware)
         app.add_middleware(RateLimitMiddleware, limiter=limiter, login_limiter=login_limiter)
         app.add_middleware(SecurityHeadersMiddleware)
 
     @staticmethod
     def _register_error_handlers(app: FastAPI) -> None:
+        def _nonce(request: Request) -> str:
+            return getattr(request.state, "csp_nonce", "")
+
+        def _is_api(request: Request) -> bool:
+            return request.url.path.startswith("/api/")
+
         async def framework_error_handler(request: Request, exc: FrameworkError):
-            if request.url.path.startswith("/api/"):
+            if _is_api(request):
                 return JSONResponse(
                     status_code=exc.status_code,
                     content=ApiResponse.fail(exc.error_code, exc.message, exc.details).to_dict(),
@@ -222,13 +253,39 @@ class ApplicationBuilder:
             if isinstance(exc, AuthenticationError) and request.url.path.startswith("/admin"):
                 return RedirectResponse("/admin/login", status_code=303)
             return HTMLResponse(
-                f"<h1>{exc.status_code}</h1><p>{exc.message}</p>",
+                render_error_page(exc.status_code, exc.message, nonce=_nonce(request)),
                 status_code=exc.status_code,
             )
 
-        app.add_exception_handler(FrameworkError, framework_error_handler)
+        async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+            """Routing-level errors (404 unknown path, 405...) — JSON envelope
+            for API paths, styled page for the web."""
+            if _is_api(request):
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content=ApiResponse.fail("HTTP_ERROR", str(exc.detail)).to_dict(),
+                )
+            return HTMLResponse(
+                render_error_page(exc.status_code, nonce=_nonce(request)),
+                status_code=exc.status_code,
+            )
 
-    def _register_controllers(self, app: FastAPI) -> None:
+        async def validation_error_handler(request: Request, exc: RequestValidationError):
+            """Pydantic boundary errors share the standard envelope."""
+            details = [{"field": ".".join(str(p) for p in err["loc"][1:]) or "body",
+                        "message": err["msg"]} for err in exc.errors()]
+            return JSONResponse(
+                status_code=422,
+                content=ApiResponse.fail("VALIDATION_FAILED", "Validation failed",
+                                         details).to_dict(),
+            )
+
+        app.add_exception_handler(FrameworkError, framework_error_handler)
+        app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+        app.add_exception_handler(RequestValidationError, validation_error_handler)
+
+    def _register_controllers(self, app: FastAPI,
+                              engine: SchedulerEngine | None = None) -> None:
         """Mounts only the controllers of the modules deployed in this process
         (APP_MODULES) — a scheduler-only container exposes no web routes."""
         c = self._container
@@ -250,7 +307,8 @@ class ApplicationBuilder:
                 AdminWebController(settings, auth_handler, c.resolve(MenuService),
                                    c.resolve(UserService), c.resolve(DashboardService),
                                    c.resolve(SystemService), c.resolve(LogRepository),
-                                   c.resolve(ContentService)),
+                                   c.resolve(ContentService),
+                                   c.resolve(SiteSettingsService), engine),
                 AdminAuthApiController(auth_handler, auth_service,
                                        cookie_secure=settings.is_production),
                 AdminUserApiController(auth_handler, auth_service, c.resolve(UserService)),
@@ -260,8 +318,10 @@ class ApplicationBuilder:
                 AdminLogApiController(auth_handler, auth_service, c.resolve(LogRepository)),
                 AdminDashboardApiController(auth_handler, auth_service,
                                             c.resolve(DashboardService)),
+                AdminSettingsApiController(auth_handler, auth_service,
+                                           c.resolve(SiteSettingsService)),
                 AdminSystemApiController(auth_handler, auth_service,
-                                         c.resolve(SystemService)),
+                                         c.resolve(SystemService), engine),
             ]
 
         for controller in controllers:

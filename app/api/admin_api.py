@@ -12,8 +12,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 
+from app.core.exceptions import ConflictError, NotFoundError, SchedulerError
 from app.core.pagination import PageRequest
 from app.core.routing import BaseApiController
+from app.scheduler.engine import SchedulerEngine
 from app.domain.models import ContentItem, DbConnectionProfile, MenuArea, MenuItem, Role
 from app.infrastructure.auth.manager import (
     ADMIN_TOKEN_COOKIE,
@@ -26,6 +28,7 @@ from app.services.auth_service import AuthService
 from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
 from app.services.menu_service import MenuService
+from app.services.site_settings_service import SiteSettingsService
 from app.services.system_service import SystemService
 from app.services.user_service import UserInput, UserService
 
@@ -67,6 +70,10 @@ class ContentRequest(BaseModel):
     seo_title: str = Field("", max_length=200)
     seo_description: str = Field("", max_length=300)
     is_published: bool = True
+
+
+class SettingsUpdateRequest(BaseModel):
+    values: dict[str, str] = Field(min_length=1)
 
 
 class DbConnectionRequest(BaseModel):
@@ -301,18 +308,57 @@ class AdminDashboardApiController(AdminApiController):
             return self.ok(self._dashboard.metrics())
 
 
+class AdminSettingsApiController(AdminApiController):
+    prefix = "/api/admin/settings"
+
+    def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
+                 site_settings: SiteSettingsService) -> None:
+        super().__init__(auth_handler, auth_service)
+        self._site_settings = site_settings
+
+    def _register(self, router: APIRouter) -> None:
+        @router.get("")
+        def get_settings(user: CurrentUser = Depends(self._guard)) -> dict:
+            return self.ok(self._site_settings.all())
+
+        @router.put("")
+        def update_settings(payload: SettingsUpdateRequest,
+                            user: CurrentUser = Depends(self._guard)) -> dict:
+            updated = self._site_settings.update(payload.values,
+                                                 actor=self._actor_name(user))
+            return self.ok(updated)
+
+
 class AdminSystemApiController(AdminApiController):
     prefix = "/api/admin/system"
 
     def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
-                 system: SystemService) -> None:
+                 system: SystemService, engine: SchedulerEngine | None = None) -> None:
         super().__init__(auth_handler, auth_service)
         self._system = system
+        self._engine = engine
 
     def _register(self, router: APIRouter) -> None:
         @router.get("/health")
         def health(user: CurrentUser = Depends(self._guard)) -> dict:
             return self.ok(self._system.health_report())
+
+        @router.get("/jobs")
+        def list_jobs(user: CurrentUser = Depends(self._guard)) -> dict:
+            if self._engine is None:
+                return self.ok({"available": False, "jobs": []})
+            return self.ok({"available": True, "jobs": self._engine.status_report})
+
+        @router.post("/jobs/{job_name}/run")
+        async def run_job(job_name: str,
+                          user: CurrentUser = Depends(self._guard)) -> dict:
+            if self._engine is None:
+                raise ConflictError("Scheduler is not running in this process")
+            try:
+                result = await self._engine.run_job_now(job_name)
+            except SchedulerError:
+                raise NotFoundError(f"Unknown job: {job_name}") from None
+            return self.ok(result.to_dict())
 
         @router.get("/db-connections")
         def list_profiles(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),

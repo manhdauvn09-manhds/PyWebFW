@@ -166,10 +166,12 @@ copy .env.example .env        &lt;# sửa SECURITY_SECRET_KEY #&gt;
   <table>
     <tr><th>Màn hình</th><th>URL</th><th>Chức năng</th></tr>
     <tr><td>Admin Home</td><td><code>/admin</code></td><td>Danh sách lối tắt theo menu admin</td></tr>
-    <tr><td>Dashboard</td><td><code>/admin/dashboard</code></td><td>Số liệu users/contents/logs, tình trạng DB (latency), cache, 8 hành động gần nhất</td></tr>
+    <tr><td>Dashboard</td><td><code>/admin/dashboard</code></td><td>Online now, lượt xem hôm nay, biểu đồ 7 ngày, top trang, số liệu users/contents/logs, tình trạng DB, 8 hành động gần nhất</td></tr>
     <tr><td>Users</td><td><code>/admin/users</code></td><td>Danh sách user; CRUD qua <code>/api/admin/users</code> (xem mục 4)</td></tr>
     <tr><td>Menus</td><td><code>/admin/menus</code></td><td>Danh sách menu 2 vùng public/admin; sửa qua API menus</td></tr>
     <tr><td>Contents</td><td><code>/admin/contents</code></td><td>CMS editor: danh sách + form tạo/sửa/xóa nội dung trang public (slug, SEO, publish) — lưu qua API, cache tự invalidate</td></tr>
+    <tr><td>Jobs</td><td><code>/admin/jobs</code></td><td>Giám sát scheduler: lịch chạy, kết quả gần nhất (status/duration/attempts), nút "Run now" cho từng job</td></tr>
+    <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Cấu hình runtime (tagline, footer, SEO mặc định, <strong>maintenance mode</strong>) — áp dụng ngay không cần deploy</td></tr>
     <tr><td>Logs</td><td><code>/admin/logs</code></td><td>Audit trail: ai làm gì, lúc nào, mức độ (info/warning/error)</td></tr>
     <tr><td>DB Connections</td><td><code>/admin/db-connections</code></td><td>Hồ sơ kết nối DB (DSN được che credentials) + tình trạng health tổng</td></tr>
   </table>
@@ -194,7 +196,9 @@ Content-Type: application/json
     <tr><td>GET/POST · PUT/DELETE</td><td><code>/api/admin/menus[/{id}]</code></td><td>Sửa menu tự invalidate cache</td></tr>
     <tr><td>GET/POST · GET/PUT/DELETE</td><td><code>/api/admin/contents[/{id}]</code></td><td>CRUD nội dung CMS; slug pattern <code>a-z0-9-</code>; tự invalidate cache slug cũ + mới</td></tr>
     <tr><td>GET</td><td><code>/api/admin/logs?level=error</code></td><td>level: info | warning | error</td></tr>
-    <tr><td>GET</td><td><code>/api/admin/dashboard/metrics</code> · <code>/api/admin/system/health</code></td><td>—</td></tr>
+    <tr><td>GET</td><td><code>/api/admin/dashboard/metrics</code> · <code>/api/admin/system/health</code></td><td>metrics gồm cả traffic: online, today_hits, series 7 ngày, top_pages</td></tr>
+    <tr><td>GET/PUT</td><td><code>/api/admin/settings</code></td><td>PUT body <code>{"values": {key: value}}</code> — chỉ nhận key trong danh sách known settings</td></tr>
+    <tr><td>GET · POST</td><td><code>/api/admin/system/jobs</code> · <code>/jobs/{name}/run</code></td><td>Danh sách job + chạy thủ công (404 nếu sai tên, 409 nếu process không gánh scheduler)</td></tr>
     <tr><td>GET/POST/DELETE</td><td><code>/api/admin/system/db-connections[/{id}]</code></td><td>DSN trả về luôn được mask</td></tr>
   </table>
 </section>

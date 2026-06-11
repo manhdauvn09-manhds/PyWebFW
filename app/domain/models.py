@@ -101,6 +101,14 @@ class ContentItem(BaseEntity):
 
 
 @dataclass(slots=True)
+class SettingEntry(BaseEntity):
+    """A single key-value system setting, editable from the admin area."""
+
+    key: str = ""
+    value: str = ""
+
+
+@dataclass(slots=True)
 class DbConnectionProfile(BaseEntity):
     name: str = ""
     driver: str = "sqlite"
