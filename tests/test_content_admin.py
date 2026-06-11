@@ -5,7 +5,7 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from app.scheduler.base import JobStatus
+from pywebfw.scheduler.base import JobStatus
 
 
 def test_content_crud_flow_end_to_end(client: TestClient, auth_headers: dict[str, str]) -> None:

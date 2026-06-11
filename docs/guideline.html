@@ -25,16 +25,17 @@
   <h2>1. Quy tắc phụ thuộc giữa các tầng (bắt buộc)</h2>
   <table>
     <tr><th>Tầng (package)</th><th>Được import từ</th><th>CẤM import</th></tr>
-    <tr><td><code>app/domain</code></td><td>stdlib</td><td>Mọi tầng khác (HTTP, SQL, service…)</td></tr>
-    <tr><td><code>app/core</code></td><td>stdlib, fastapi/starlette (riêng routing/middleware)</td><td>services, repositories, web, api</td></tr>
-    <tr><td><code>app/repositories</code></td><td>core, domain, <code>BaseDatabaseManager</code> (ABC)</td><td>sqlite3 trực tiếp, services, web/api</td></tr>
-    <tr><td><code>app/services</code></td><td>core, domain, repositories, ABC hạ tầng (cache/security)</td><td>fastapi Request/Response, web/api</td></tr>
-    <tr><td><code>app/web</code> · <code>app/api</code></td><td>core, services, domain</td><td>repositories trực tiếp (trừ đọc thuần như LogRepository cho trang log)</td></tr>
-    <tr><td><code>app/scheduler</code></td><td>core, services, repositories, ABC hạ tầng</td><td>web, api</td></tr>
-    <tr><td><code>app/bootstrap.py</code></td><td>TẤT CẢ — đây là nơi duy nhất biết class cụ thể</td><td>—</td></tr>
+    <tr><td><code>pywebfw/domain</code></td><td>stdlib</td><td>Mọi tầng khác (HTTP, SQL, service…)</td></tr>
+    <tr><td><code>pywebfw/core</code></td><td>stdlib, fastapi/starlette (riêng routing/middleware)</td><td>services, repositories, web, api</td></tr>
+    <tr><td><code>pywebfw/repositories</code></td><td>core, domain, <code>BaseDatabaseManager</code> (ABC)</td><td>sqlite3 trực tiếp, services, web/api</td></tr>
+    <tr><td><code>pywebfw/services</code></td><td>core, domain, repositories, ABC hạ tầng (cache/security/mail)</td><td>fastapi Request/Response, web/api</td></tr>
+    <tr><td><code>pywebfw/web</code> · <code>pywebfw/api</code></td><td>core, services, domain</td><td>repositories trực tiếp (trừ đọc thuần như LogRepository cho trang log)</td></tr>
+    <tr><td><code>pywebfw/scheduler</code></td><td>core, services, repositories, ABC hạ tầng</td><td>web, api</td></tr>
+    <tr><td><code>pywebfw/bootstrap.py</code></td><td>TẤT CẢ — nơi duy nhất biết class cụ thể (+ gọi hook plugin)</td><td>—</td></tr>
+    <tr><td><strong>Ứng dụng</strong> (vd <code>app/</code>, project scaffold)</td><td>pywebfw qua <code>AppModule</code> hooks + các base class public</td><td><strong>Sửa code bên trong pywebfw</strong> — mọi mở rộng đi qua plugin</td></tr>
   </table>
-  <div class="note">Nguyên tắc vàng: <strong>tầng trên chỉ biết ABC của tầng dưới</strong>. Nếu phải import một class cụ thể
-  (ví dụ <code>SQLiteDatabaseManager</code>) ở ngoài bootstrap — thiết kế đang sai, dừng lại và sửa.</div>
+  <div class="note">Nguyên tắc vàng: <strong>tầng trên chỉ biết ABC của tầng dưới</strong>; <strong>ứng dụng chỉ mở rộng qua plugin</strong>.
+  Khởi tạo dự án mới: <code>pywebfw new myproject</code> (hoặc <code>python -m pywebfw new myproject</code>).</div>
 </section>
 
 <section class="card">

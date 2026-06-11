@@ -5,8 +5,8 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from app.scheduler.base import JobStatus
-from app.scheduler.engine import SchedulerEngine
+from pywebfw.scheduler.base import JobStatus
+from pywebfw.scheduler.engine import SchedulerEngine
 
 
 def _engine(client: TestClient) -> SchedulerEngine:

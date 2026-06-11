@@ -5,8 +5,8 @@ import asyncio
 
 from fastapi.testclient import TestClient
 
-from app.core.events import EventBus
-from app.scheduler.base import (
+from pywebfw.core.events import EventBus
+from pywebfw.scheduler.base import (
     BaseSchedulerJob,
     IntervalSchedule,
     JobStatus,
@@ -71,7 +71,7 @@ class AlwaysFailingJob(BaseSchedulerJob):
 
 def test_failed_job_publishes_event_and_audits(tmp_path) -> None:
     # Fresh app: never pollute the session-scoped engine's registry.
-    from app.bootstrap import ApplicationBuilder
+    from pywebfw.bootstrap import ApplicationBuilder
     from tests.conftest import build_test_settings, unlock_seed_admin
 
     settings = build_test_settings(str(tmp_path / "jobfail.db"))

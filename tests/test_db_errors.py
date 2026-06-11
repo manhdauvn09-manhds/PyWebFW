@@ -4,10 +4,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.exceptions import ConflictError, DatabaseError
-from app.domain.models import User
-from app.infrastructure.database.manager import BaseDatabaseManager
-from app.repositories.user_repository import UserRepository
+from pywebfw.core.exceptions import ConflictError, DatabaseError
+from pywebfw.domain.models import User
+from pywebfw.infrastructure.database.manager import BaseDatabaseManager
+from pywebfw.repositories.user_repository import UserRepository
 
 
 def test_unique_violation_maps_to_conflict_not_500(client: TestClient) -> None:

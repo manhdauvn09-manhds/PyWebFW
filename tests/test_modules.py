@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.bootstrap import ApplicationBuilder
+from pywebfw.bootstrap import ApplicationBuilder
 from tests.conftest import build_test_settings
 
 

@@ -1,12 +1,34 @@
 # PyWebFW — OOP-first Python Web Framework
 
 A reusable, layered, object-oriented framework providing: public front-end
-pages, public APIs, an admin area, admin APIs, and a scheduler/cron subsystem —
-all sharing one core infrastructure (DI container, DB pool, cache, auth,
-logging, validation).
+pages + CMS, public APIs, an admin area (14 screens), admin APIs, scheduler,
+auth with 2FA, traffic analytics, and an event bus — all sharing one core
+infrastructure (DI container, DB pool, cache, auth, logging, validation).
 
 Built on **FastAPI/Starlette** as the HTTP engine; everything above transport
 level is framework-owned OOP code.
+
+**The framework is an installable package (`pywebfw/`); applications are thin
+consumers** — see the demo in `app/` and the scaffolding below.
+
+## Start a new project
+
+```bash
+pip install -e .                      # or: pip install pywebfw (when published)
+pywebfw new mysite                    # scaffolds a complete project
+cd mysite && python run.py            # public site + admin + scheduler running
+```
+
+Projects extend the framework through `AppModule` plugins (pages, APIs, jobs,
+services, event handlers) — framework code is never modified:
+
+```python
+# mysite/main.py
+from pywebfw.bootstrap import ApplicationBuilder
+from mysite.extensions import ProjectModule
+
+app = ApplicationBuilder(plugins=[ProjectModule()]).build_app()
+```
 
 ## Quick start
 
@@ -86,28 +108,36 @@ changes.
 
 | Folder | Purpose |
 |---|---|
-| `app/config/` | Immutable env-based settings (composed dataclasses) |
-| `app/core/` | Framework kernel: exceptions, logging, DI container, responses, pagination, validation, security, routing, middleware |
-| `app/infrastructure/` | Adapters: database (pool + UoW + schema), cache, auth |
-| `app/domain/` | Persistence-agnostic entities (`BaseEntity` + children) |
-| `app/repositories/` | `BaseRepository[T]` + one repository per aggregate |
-| `app/services/` | Business logic (`BaseService`, `AuditMixin`) |
-| `app/web/` | OOP UI: components → layouts → pages (public + admin) + web controllers |
-| `app/api/` | Class-based JSON API controllers (public + admin) |
-| `app/scheduler/` | Job framework: `Schedule`, `RetryPolicy`, `BaseSchedulerJob`, engine + built-in jobs |
-| `app/bootstrap.py` | Composition root — the only place with concrete wiring |
+| `pywebfw/` | **The framework package** (installable, versioned) |
+| `pywebfw/config/` | Immutable env-based settings (composed dataclasses) |
+| `pywebfw/core/` | Kernel: exceptions, logging, DI container, responses, pagination, validation, security, routing, middleware, events, csv_export |
+| `pywebfw/infrastructure/` | Adapters: database (pool + UoW + schema), cache, auth, mail, media |
+| `pywebfw/domain/` | Persistence-agnostic entities (`BaseEntity` + children) |
+| `pywebfw/repositories/` | `BaseRepository[T]` + one repository per aggregate |
+| `pywebfw/services/` | Business logic (`BaseService`, `AuditMixin`) |
+| `pywebfw/web/` | OOP UI: components → layouts → pages (public + admin) + web controllers |
+| `pywebfw/api/` | Class-based JSON API controllers (public + admin) |
+| `pywebfw/scheduler/` | Job framework: `Schedule`, `RetryPolicy`, `BaseSchedulerJob`, engine + built-in jobs |
+| `pywebfw/bootstrap.py` | Composition root + `AppModule` plugin hooks |
+| `pywebfw/plugins.py` | The plugin contract applications implement |
+| `pywebfw/cli.py` | `pywebfw new <project>` scaffolding |
+| `app/` | **Demo application** — thin consumer showing the plugin pattern |
 | `tests/` | End-to-end tests through the real HTTP stack |
 | `docs/` | Architecture documentation |
 
-## Extending
+## Extending (from application code — never edit the framework)
 
-- **New public page**: subclass `PublicPage` (or `ContentPage` for CMS-backed),
-  add one entry in `PublicWebController._page_routes`.
-- **New admin screen**: subclass `AdminPage`, add one entry in `AdminWebController`.
-- **New API resource**: subclass `BaseApiController` (or `AdminApiController`
-  for RBAC-guarded), register it in `ApplicationBuilder._register_controllers`.
-- **New scheduled job**: subclass `BaseSchedulerJob`, set `name`/`schedule`/
-  `retry_policy`, implement `run()`, register in `ApplicationBuilder._build_scheduler`.
-- **New storage engine**: implement `BaseDatabaseManager`; nothing else changes.
+Implement an `AppModule` and pass it to `ApplicationBuilder(plugins=[...])`:
+
+- **`controllers()`** — mount custom pages (subclass `PublicPage`/`AdminPage`)
+  and API resources (subclass `BaseApiController`/`AdminApiController`).
+- **`jobs()`** — register `BaseSchedulerJob` subclasses.
+- **`register_services()`** — add services to the DI container.
+- **`subscribe_events()`** — react to domain events (`contact.submitted`,
+  `content.slug_changed`, `job.failed`, your own).
+- **`init_schema()`** — create the module's tables (idempotent).
+
+New storage/cache/mail backend: implement the matching ABC
+(`BaseDatabaseManager`, `BaseCacheManager`, `BaseMailer`) — nothing else changes.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.

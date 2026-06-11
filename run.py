@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uvicorn
 
-from app.config.settings import get_settings
+from pywebfw.config.settings import get_settings
 
 
 def main() -> None:

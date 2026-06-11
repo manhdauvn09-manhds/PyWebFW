@@ -35,6 +35,16 @@ bootstrap.py = the single composition root
 | `BasePage` → Public/Admin | 10 public pages + dynamic `/{slug}` catch-all; 14 admin screens |
 | `BaseController` → `BaseApiController` | Public API + 11 admin API controllers (RBAC via `AdminApiController`) |
 
+## Framework vs application
+
+`pywebfw/` is an installable, versioned package; applications are thin
+consumers. Projects extend it ONLY through `AppModule` plugins
+(`register_services / init_schema / controllers / jobs / subscribe_events`)
+passed to `ApplicationBuilder(plugins=[...])`. Scaffold a new project with
+`pywebfw new <name>` — it generates the package, extensions module, tests,
+Dockerfile and env files. The `app/` package in this repo is the reference
+demo application.
+
 ## Deployment
 
 One Docker image; `APP_MODULES` (public/admin/scheduler) selects the role per

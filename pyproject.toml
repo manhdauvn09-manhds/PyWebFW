@@ -1,13 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "pywebfw"
-version = "0.1.0"
-description = "Reusable OOP-first Python web framework: public site, admin, APIs, scheduler"
+version = "0.2.0"
+description = "Reusable OOP-first Python web framework: public site + CMS, admin, APIs, scheduler, plugins"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "pydantic[email]>=2.7",
     "python-multipart>=0.0.9",
 ]
+
+[project.scripts]
+pywebfw = "pywebfw.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["pywebfw*"]
 
 [project.optional-dependencies]
 dev = [

@@ -1,6 +1,8 @@
 """ASGI entry point: `uvicorn app.main:app`."""
 from __future__ import annotations
 
-from app.bootstrap import ApplicationBuilder
+from pywebfw.bootstrap import ApplicationBuilder
 
-app = ApplicationBuilder().build_app()
+from app.extensions import DemoModule
+
+app = ApplicationBuilder(plugins=[DemoModule()]).build_app()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.bootstrap import ApplicationBuilder
+from pywebfw.bootstrap import ApplicationBuilder
 from tests.conftest import build_test_settings, unlock_seed_admin
 
 PNG_BYTES = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)

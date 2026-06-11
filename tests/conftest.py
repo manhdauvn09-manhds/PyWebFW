@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.bootstrap import ApplicationBuilder
-from app.config.settings import (
+from pywebfw.bootstrap import ApplicationBuilder
+from pywebfw.config.settings import (
     KNOWN_MODULES,
     AppSettings,
     CacheSettings,

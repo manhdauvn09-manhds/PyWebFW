@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.bootstrap import ApplicationBuilder
-from app.core.security import TotpProvider
+from pywebfw.bootstrap import ApplicationBuilder
+from pywebfw.core.security import TotpProvider
 from tests.conftest import build_test_settings, unlock_seed_admin
 
 
