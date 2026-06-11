@@ -34,6 +34,7 @@ padding:1rem;margin:.5rem;min-width:140px;text-align:center}
 .app-form input[type=checkbox]{display:inline-block;width:auto}
 .app-form textarea{display:block;width:480px;max-width:100%;height:160px;padding:.35rem}
 .search-form input{padding:.4rem;width:260px}
+.hp-field{position:absolute;left:-9999px;top:-9999px}
 .admin-badge{background:#b91c1c;color:#fff;padding:.1rem .5rem;border-radius:4px;font-size:.75rem}
 """
 

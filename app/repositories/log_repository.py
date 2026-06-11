@@ -42,6 +42,13 @@ class LogRepository(BaseRepository[AuditLog]):
         """Used by the cleanup scheduler job. Returns rows removed."""
         return self._db.execute("DELETE FROM audit_logs WHERE created_at < ?", (iso_timestamp,))
 
+    def last_login_map(self) -> dict[str, str]:
+        """username -> timestamp of the most recent successful login."""
+        rows = self._db.fetch_all(
+            "SELECT actor, MAX(created_at) AS last_login FROM audit_logs"
+            " WHERE action = 'login.success' GROUP BY actor")
+        return {row["actor"]: row["last_login"] for row in rows}
+
     def count_by_level(self) -> dict[str, int]:
         rows = self._db.fetch_all(
             "SELECT level, COUNT(*) AS n FROM audit_logs GROUP BY level")

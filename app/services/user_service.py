@@ -94,6 +94,16 @@ class UserService(BaseService, AuditMixin):
             self._audit(actor, "user.updated", target=user.username)
         return user
 
+    def revoke_sessions(self, user_id: int, actor: str) -> User:
+        """Admin action: invalidates every outstanding token of the user."""
+        user = self._users.get_by_id(user_id)
+        user.revoke_tokens()
+        with UnitOfWork(self._db):
+            self._users.update(user)
+            self._audit(actor, "user.sessions_revoked", target=user.username,
+                        level="warning")
+        return user
+
     def delete(self, user_id: int, actor: str) -> None:
         user = self._users.get_by_id(user_id)
         if user.username == actor:

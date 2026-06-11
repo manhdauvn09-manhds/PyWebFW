@@ -170,6 +170,10 @@ copy .env.example .env        &lt;# sửa SECURITY_SECRET_KEY #&gt;
     <tr><td>Users</td><td><code>/admin/users</code></td><td>Danh sách user; CRUD qua <code>/api/admin/users</code> (xem mục 4)</td></tr>
     <tr><td>Menus</td><td><code>/admin/menus</code></td><td>Danh sách menu 2 vùng public/admin; sửa qua API menus</td></tr>
     <tr><td>Contents</td><td><code>/admin/contents</code></td><td>CMS editor: danh sách + form tạo/sửa/xóa nội dung trang public (slug, SEO, publish) — lưu qua API, cache tự invalidate</td></tr>
+    <tr><td>Messages</td><td><code>/admin/messages</code></td><td>Hộp thư contact form: xem/đánh dấu đã đọc/xóa; tin mới có thể notify qua email (MAIL_ADMIN_EMAIL)</td></tr>
+    <tr><td>Media</td><td><code>/admin/media</code></td><td>Upload &amp; quản lý file (jpg/png/gif/webp/pdf, giới hạn dung lượng); file phục vụ tại <code>/media/&lt;tên&gt;</code> với tên ngẫu nhiên</td></tr>
+    <tr><td>Sessions</td><td><code>/admin/sessions</code></td><td>Phiên đăng nhập: lần login cuối mỗi user + nút thu hồi toàn bộ token của user đó</td></tr>
+    <tr><td>Backups</td><td><code>/admin/backups</code></td><td>Danh sách backup DB, tạo thủ công, tải về, xóa (tự động hằng đêm 02:30, giữ 7 bản)</td></tr>
     <tr><td>Jobs</td><td><code>/admin/jobs</code></td><td>Giám sát scheduler: lịch chạy, kết quả gần nhất (status/duration/attempts), nút "Run now" cho từng job</td></tr>
     <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Cấu hình runtime (tagline, footer, SEO mặc định, <strong>maintenance mode</strong>) — áp dụng ngay không cần deploy</td></tr>
     <tr><td>Logs</td><td><code>/admin/logs</code></td><td>Audit trail: ai làm gì, lúc nào, mức độ (info/warning/error)</td></tr>
@@ -190,6 +194,11 @@ Content-Type: application/json
   <table>
     <tr><th>Method</th><th>Endpoint</th><th>Ghi chú</th></tr>
     <tr><td>GET</td><td><code>/api/public/menus</code> · <code>/content/{slug}</code> · <code>/search?q=</code> · <code>/sitemap</code></td><td>Không cần auth</td></tr>
+    <tr><td>POST</td><td><code>/api/public/contact</code></td><td>Gửi liên hệ: honeypot field <code>website</code> + giới hạn 3 tin / 10 phút / IP (429)</td></tr>
+    <tr><td>GET/POST · DELETE</td><td><code>/api/admin/messages</code> · <code>/{id}/read</code> · <code>/{id}</code></td><td>Quản lý hộp thư liên hệ</td></tr>
+    <tr><td>GET/POST · DELETE</td><td><code>/api/admin/media[/{name}]</code></td><td>Upload multipart field <code>file</code>; whitelist đuôi file + giới hạn size</td></tr>
+    <tr><td>GET/POST · GET/DELETE</td><td><code>/api/admin/backups</code> · <code>/{name}/download</code></td><td>Backup thủ công + tải về (tên file validate chặt)</td></tr>
+    <tr><td>POST</td><td><code>/api/admin/users/{id}/revoke-sessions</code></td><td>Thu hồi mọi token của user (đăng xuất mọi thiết bị)</td></tr>
     <tr><td>POST</td><td><code>/api/admin/auth/change-password</code></td><td>Body: current_password, new_password (≥8 ký tự) — trả token mới, token cũ bị thu hồi</td></tr>
     <tr><td>GET/POST</td><td><code>/api/admin/users</code></td><td>Paging: <code>?page=&amp;size=&amp;sort_by=&amp;sort_desc=</code></td></tr>
     <tr><td>GET/PUT/DELETE</td><td><code>/api/admin/users/{id}</code></td><td>PUT bỏ trống password = giữ nguyên</td></tr>

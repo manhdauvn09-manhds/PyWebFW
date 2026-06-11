@@ -78,8 +78,52 @@ class IntroductionPage(ContentPage):
     slug = "introduction"
 
 
+_CONTACT_FORM_SCRIPT = """
+<script nonce="__NONCE__">
+const form = document.getElementById('contact-form');
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = form.querySelector('.form-message');
+  const el = (name) => form.elements[name];
+  const res = await fetch('/api/public/contact', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      name: el('name').value, email: el('email').value,
+      subject: el('subject').value, message: el('message').value,
+      website: el('website').value,
+    }),
+  });
+  const result = await res.json();
+  if (result.success) { form.reset(); message.textContent = 'Thank you! Your message has been sent.'; }
+  else { message.textContent = result.error?.message || 'Sending failed, please try again.'; }
+});
+</script>
+"""
+
+
 class ContactPage(ContentPage):
+    """CMS intro text + a working contact form (honeypot + rate-limited API)."""
+
     slug = "contact"
+
+    def build_content(self) -> str:
+        script = _CONTACT_FORM_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
+        form = (
+            "<h2>Send us a message</h2>"
+            '<form id="contact-form" class="app-form">'
+            '<label>Your name<input name="name" required maxlength="100"></label>'
+            '<label>Email<input name="email" type="email" required></label>'
+            '<label>Subject<input name="subject" maxlength="150"></label>'
+            '<label>Message<textarea name="message" required minlength="10"'
+            ' maxlength="5000"></textarea></label>'
+            # Honeypot: visually hidden; bots fill it, humans never see it.
+            '<div class="hp-field" aria-hidden="true">'
+            '<label>Website<input name="website" tabindex="-1" autocomplete="off"></label></div>'
+            '<button type="submit">Send message</button>'
+            '<div class="form-message" role="status"></div></form>'
+        )
+        return f"{super().build_content()}{form}{script}"
 
 
 class PrivacyPolicyPage(ContentPage):

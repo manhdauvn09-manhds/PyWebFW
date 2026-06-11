@@ -84,6 +84,23 @@ class SchedulerSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class MailSettings:
+    host: str = ""                 # empty -> NullMailer (log only)
+    port: int = 587
+    username: str = ""
+    password: str = ""
+    use_tls: bool = True
+    from_address: str = "noreply@example.com"
+    admin_email: str = ""          # recipient for system notifications
+
+
+@dataclass(frozen=True, slots=True)
+class MediaSettings:
+    dir: str = "data/media"
+    max_upload_mb: int = 5
+
+
+@dataclass(frozen=True, slots=True)
 class RateLimitSettings:
     max_requests: int
     window_seconds: int
@@ -105,6 +122,8 @@ class AppSettings:
     scheduler: SchedulerSettings
     rate_limit: RateLimitSettings
     modules: frozenset[str] = field(default=KNOWN_MODULES)
+    mail: MailSettings = field(default_factory=MailSettings)
+    media: MediaSettings = field(default_factory=MediaSettings)
 
     def __post_init__(self) -> None:
         if not self.modules:
@@ -135,6 +154,19 @@ class SettingsFactory:
         modules = frozenset(m.strip().lower() for m in modules_raw.split(",") if m.strip())
         settings = AppSettings(
             modules=modules,
+            mail=MailSettings(
+                host=env.text("MAIL_HOST", ""),
+                port=env.integer("MAIL_PORT", 587),
+                username=env.text("MAIL_USERNAME", ""),
+                password=env.text("MAIL_PASSWORD", ""),
+                use_tls=env.boolean("MAIL_USE_TLS", True),
+                from_address=env.text("MAIL_FROM", "noreply@example.com"),
+                admin_email=env.text("MAIL_ADMIN_EMAIL", ""),
+            ),
+            media=MediaSettings(
+                dir=env.text("MEDIA_DIR", "data/media"),
+                max_upload_mb=env.integer("MEDIA_MAX_UPLOAD_MB", 5),
+            ),
             name=env.text("APP_NAME", "PyWebFW"),
             environment=env.text("APP_ENV", "development"),
             debug=env.boolean("APP_DEBUG", True),

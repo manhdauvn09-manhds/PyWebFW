@@ -4,7 +4,6 @@ add new automation by writing another subclass and registering it in bootstrap.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from app.core.exceptions import SchedulerError
 from app.infrastructure.cache.manager import BaseCacheManager, InMemoryCacheManager
@@ -16,6 +15,7 @@ from app.scheduler.base import (
     IntervalSchedule,
     RetryPolicy,
 )
+from app.services.backup_service import BackupService
 from app.services.menu_service import MenuService
 from app.services.system_service import ServerHealthChecker
 from app.services.traffic_service import TrafficService
@@ -122,41 +122,23 @@ class TrafficFlushJob(BaseSchedulerJob):
 
 
 class DatabaseBackupJob(BaseSchedulerJob):
-    """Nightly on-line backup of the SQLite database (VACUUM INTO produces a
-    consistent snapshot without locking writers), keeping the newest N copies.
-    Non-SQLite engines should rely on pg_dump / managed backups instead."""
+    """Nightly on-line database backup. The snapshot/rotation logic lives in
+    BackupService (shared with the admin Backup Manager screen)."""
 
     name = "database-backup"
     schedule = DailyTimeSchedule(hour=2, minute=30)
     retry_policy = RetryPolicy(max_attempts=2, delay_seconds=5)
 
-    def __init__(self, db: BaseDatabaseManager, db_path: str, keep: int = 7) -> None:
+    def __init__(self, backups: "BackupService") -> None:
         super().__init__()
-        self._db = db
-        self._db_path = db_path
-        self._keep = keep
+        self._backups = backups
 
     def run(self) -> str:
-        if self._db.dialect != "sqlite":
+        if not self._backups.supported:
             return "skipped (non-sqlite engine: use pg_dump / managed backups)"
-        if self._db_path == ":memory:":
-            return "skipped (in-memory database)"
-        backup_dir = Path(self._db_path).parent / "backups"
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
-        target = backup_dir / f"backup-{stamp}.db"
-        escaped = str(target).replace("'", "''")
-        self._db.execute(f"VACUUM INTO '{escaped}'")
-        removed = self._rotate(backup_dir)
-        return f"backup {target.name} created, {removed} old backup(s) removed"
-
-    def _rotate(self, backup_dir: Path) -> int:
-        backups = sorted(backup_dir.glob("backup-*.db"))
-        removed = 0
-        for old in backups[:-self._keep]:
-            old.unlink(missing_ok=True)
-            removed += 1
-        return removed
+        result = self._backups.create(actor="scheduler")
+        return (f"backup {result['name']} created, "
+                f"{result['rotated']} old backup(s) removed")
 
 
 class IdleConnectionCloserJob(BaseSchedulerJob):

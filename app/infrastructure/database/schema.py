@@ -61,6 +61,18 @@ _TABLES: dict[str, str] = {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )""",
+    "contact_messages": """
+        CREATE TABLE IF NOT EXISTS contact_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT NOT NULL,
+            subject TEXT NOT NULL DEFAULT '',
+            message TEXT NOT NULL,
+            ip_hash TEXT NOT NULL DEFAULT '',
+            is_read INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
     "system_settings": """
         CREATE TABLE IF NOT EXISTS system_settings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,8 +160,10 @@ _SEED_PUBLIC_MENU = [
 ]
 _SEED_ADMIN_MENU = [
     ("Dashboard", "/admin"), ("Users", "/admin/users"), ("Menus", "/admin/menus"),
-    ("Contents", "/admin/contents"), ("Jobs", "/admin/jobs"),
-    ("Settings", "/admin/settings"), ("Logs", "/admin/logs"),
+    ("Contents", "/admin/contents"), ("Messages", "/admin/messages"),
+    ("Media", "/admin/media"), ("Jobs", "/admin/jobs"),
+    ("Settings", "/admin/settings"), ("Sessions", "/admin/sessions"),
+    ("Backups", "/admin/backups"), ("Logs", "/admin/logs"),
     ("DB Connections", "/admin/db-connections"),
 ]
 

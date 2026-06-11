@@ -12,8 +12,11 @@ from app.core.exceptions import NotFoundError
 from app.core.pagination import PageRequest
 from app.domain.models import ContentItem
 from app.scheduler.engine import SchedulerEngine
+from app.services.backup_service import BackupService
+from app.services.contact_service import ContactService
 from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
+from app.services.media_service import MediaService
 from app.services.menu_service import MenuService
 from app.services.site_settings_service import KNOWN_SETTINGS, SiteSettingsService
 from app.services.system_service import SystemService
@@ -455,6 +458,181 @@ class SettingsPage(AdminPage):
                 '<button type="submit">Save settings</button>'
                 '<div class="form-message" role="alert"></div></form>'
                 f"{script}")
+
+
+_ACTION_BUTTONS_SCRIPT = """
+<script nonce="__NONCE__">
+document.querySelectorAll('button[data-action]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    if (btn.dataset.confirm && !confirm(btn.dataset.confirm)) return;
+    btn.disabled = true;
+    await fetch(btn.dataset.action, {
+      method: btn.dataset.method || 'POST',
+      headers: {'X-Requested-With': 'fetch'},
+    });
+    window.location.reload();
+  });
+});
+</script>
+"""
+
+
+def _action_script(nonce: str) -> str:
+    return _ACTION_BUTTONS_SCRIPT.replace("__NONCE__", esc(nonce))
+
+
+class ContactMessagesPage(AdminPage):
+    """Inbox for public contact-form submissions."""
+
+    def __init__(self, ctx: PageContext, contact: ContactService) -> None:
+        super().__init__(ctx)
+        self._contact = contact
+
+    @property
+    def title(self) -> str:
+        return "Contact Messages"
+
+    def build_content(self) -> str:
+        result = self._contact.list_messages(PageRequest.create(size=50))
+        rows = "".join(
+            f"<tr><td>{esc(m.created_at)}</td><td>{esc(m.name)}</td>"
+            f"<td>{esc(m.email)}</td><td>{esc(m.subject)}</td>"
+            f"<td>{esc(m.message[:120])}</td>"
+            f"<td>{'✓' if m.is_read else '<strong>new</strong>'}</td>"
+            f'<td><button data-action="/api/admin/messages/{esc(m.id)}/read">Read</button> '
+            f'<button data-action="/api/admin/messages/{esc(m.id)}" data-method="DELETE"'
+            f' data-confirm="Delete this message?">Delete</button></td></tr>'
+            for m in result.items
+        ) or '<tr><td colspan="7">No messages</td></tr>'
+        return (f"<h1>Messages ({result.total} — {self._contact.unread_count()} unread)</h1>"
+                '<table class="data-table"><thead><tr><th>Date</th><th>Name</th>'
+                "<th>Email</th><th>Subject</th><th>Message</th><th>Status</th><th></th>"
+                f"</tr></thead><tbody>{rows}</tbody></table>"
+                f"{_action_script(self._ctx.csp_nonce)}")
+
+
+_MEDIA_UPLOAD_SCRIPT = """
+<script nonce="__NONCE__">
+const uploadForm = document.getElementById('upload-form');
+uploadForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = uploadForm.querySelector('.form-message');
+  const fileInput = uploadForm.elements['file'];
+  if (!fileInput.files.length) { message.textContent = 'Choose a file first.'; return; }
+  const body = new FormData();
+  body.append('file', fileInput.files[0]);
+  const res = await fetch('/api/admin/media', {
+    method: 'POST', headers: {'X-Requested-With': 'fetch'}, body,
+  });
+  const result = await res.json();
+  if (result.success) { window.location.reload(); }
+  else { message.textContent = result.error?.message || 'Upload failed'; }
+});
+</script>
+"""
+
+
+class MediaManagerPage(AdminPage):
+    """Upload and manage media files served under /media/."""
+
+    def __init__(self, ctx: PageContext, media: MediaService) -> None:
+        super().__init__(ctx)
+        self._media = media
+
+    @property
+    def title(self) -> str:
+        return "Media Manager"
+
+    def build_content(self) -> str:
+        files = self._media.list_files()
+        rows = "".join(
+            f'<tr><td><a href="{esc(f["url"])}" target="_blank">{esc(f["name"])}</a></td>'
+            f"<td>{f['size_bytes'] // 1024} KB</td><td>{esc(f['modified_at'])}</td>"
+            f"<td><code>{esc(f['url'])}</code></td>"
+            f'<td><button data-action="/api/admin/media/{esc(f["name"])}"'
+            f' data-method="DELETE" data-confirm="Delete this file?">Delete</button></td></tr>'
+            for f in files
+        ) or '<tr><td colspan="5">No files uploaded yet</td></tr>'
+        upload_script = _MEDIA_UPLOAD_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
+        return (f"<h1>Media ({len(files)})</h1>"
+                '<form id="upload-form" class="app-form">'
+                '<label>Upload file (jpg, png, gif, webp, pdf)'
+                '<input type="file" name="file" required></label>'
+                '<button type="submit">Upload</button>'
+                '<div class="form-message" role="alert"></div></form>'
+                '<table class="data-table"><thead><tr><th>File</th><th>Size</th>'
+                "<th>Uploaded</th><th>URL</th><th></th></tr></thead>"
+                f"<tbody>{rows}</tbody></table>"
+                f"{upload_script}{_action_script(self._ctx.csp_nonce)}")
+
+
+class SessionManagerPage(AdminPage):
+    """Active-session overview: last login per user + revoke-everywhere."""
+
+    def __init__(self, ctx: PageContext, users: UserService,
+                 logs: LogRepository) -> None:
+        super().__init__(ctx)
+        self._users = users
+        self._logs = logs
+
+    @property
+    def title(self) -> str:
+        return "Session Manager"
+
+    def build_content(self) -> str:
+        result = self._users.list_users(PageRequest.create(size=100))
+        last_logins = self._logs.last_login_map()
+        rows = "".join(
+            f"<tr><td>{esc(u.username)}</td><td>{esc(u.role.value)}</td>"
+            f"<td>{'yes' if u.is_active else 'no'}</td>"
+            f"<td>{esc(last_logins.get(u.username, 'never'))}</td>"
+            f'<td><button data-action="/api/admin/users/{esc(u.id)}/revoke-sessions"'
+            f' data-confirm="Revoke all sessions of {esc(u.username)}?">'
+            f"Revoke sessions</button></td></tr>"
+            for u in result.items
+        )
+        return (f"<h1>Sessions ({result.total} users)</h1>"
+                "<p>Revoking invalidates every token of that user immediately "
+                "(they must sign in again on all devices).</p>"
+                '<table class="data-table"><thead><tr><th>User</th><th>Role</th>'
+                "<th>Active</th><th>Last login</th><th></th></tr></thead>"
+                f"<tbody>{rows}</tbody></table>"
+                f"{_action_script(self._ctx.csp_nonce)}")
+
+
+class BackupManagerPage(AdminPage):
+    """List, create, download and delete database backups."""
+
+    def __init__(self, ctx: PageContext, backups: BackupService) -> None:
+        super().__init__(ctx)
+        self._backups = backups
+
+    @property
+    def title(self) -> str:
+        return "Backups"
+
+    def build_content(self) -> str:
+        if not self._backups.supported:
+            return ("<h1>Backups</h1><p>Online backup is only available for "
+                    "file-based SQLite. Use pg_dump / managed backups for "
+                    "this database engine.</p>")
+        backups = self._backups.list_backups()
+        rows = "".join(
+            f"<tr><td>{esc(b['name'])}</td><td>{b['size_bytes'] // 1024} KB</td>"
+            f"<td>{esc(b['created_at'])}</td>"
+            f'<td><a href="/api/admin/backups/{esc(b["name"])}/download">Download</a> '
+            f'<button data-action="/api/admin/backups/{esc(b["name"])}"'
+            f' data-method="DELETE" data-confirm="Delete this backup?">Delete</button>'
+            f"</td></tr>"
+            for b in backups
+        ) or '<tr><td colspan="4">No backups yet</td></tr>'
+        return (f"<h1>Backups ({len(backups)})</h1>"
+                '<p><button data-action="/api/admin/backups">Create backup now</button>'
+                " — automatic nightly at 02:30, newest 7 kept.</p>"
+                '<table class="data-table"><thead><tr><th>File</th><th>Size</th>'
+                "<th>Created</th><th></th></tr></thead>"
+                f"<tbody>{rows}</tbody></table>"
+                f"{_action_script(self._ctx.csp_nonce)}")
 
 
 class DbConnectionManagementPage(AdminPage):

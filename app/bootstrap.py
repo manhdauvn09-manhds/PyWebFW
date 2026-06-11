@@ -18,9 +18,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.admin_api import (
     AdminAuthApiController,
+    AdminBackupApiController,
+    AdminContactApiController,
     AdminContentApiController,
     AdminDashboardApiController,
     AdminLogApiController,
+    AdminMediaApiController,
     AdminMenuApiController,
     AdminSettingsApiController,
     AdminSystemApiController,
@@ -51,6 +54,9 @@ from app.infrastructure.auth.manager import BaseAuthHandler, TokenAuthHandler
 from app.infrastructure.cache.manager import BaseCacheManager, InMemoryCacheManager
 from app.infrastructure.database.manager import BaseDatabaseManager, SQLiteDatabaseManager
 from app.infrastructure.database.schema import SchemaInitializer
+from app.infrastructure.mail.mailer import BaseMailer, NullMailer, SmtpMailer
+from app.infrastructure.media.storage import BaseMediaStorage, LocalMediaStorage
+from app.repositories.contact_repository import ContactRepository
 from app.repositories.content_repository import ContentRepository
 from app.repositories.db_connection_repository import DbConnectionRepository
 from app.repositories.log_repository import LogRepository
@@ -70,8 +76,11 @@ from app.scheduler.jobs import (
     TrafficFlushJob,
 )
 from app.services.auth_service import AuthService
+from app.services.backup_service import BackupService
+from app.services.contact_service import ContactService
 from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
+from app.services.media_service import MediaService
 from app.services.menu_service import MenuService
 from app.services.search_service import SearchService
 from app.services.site_settings_service import SiteSettingsService
@@ -82,7 +91,12 @@ from app.services.system_service import (
 )
 from app.services.traffic_service import TrafficService
 from app.services.user_service import UserService
-from app.web.controllers import AdminWebController, PublicWebController
+from app.web.controllers import (
+    AdminWebController,
+    AdminWebDeps,
+    MediaWebController,
+    PublicWebController,
+)
 from app.web.error_pages import render_error_page
 
 
@@ -122,6 +136,10 @@ class ApplicationBuilder:
             settings.security.secret_key, settings.security.token_ttl_seconds))
         c.register_singleton(BaseAuthHandler, lambda c: TokenAuthHandler(
             c.resolve(TokenManager), c.resolve(UserRepository)))
+        c.register_singleton(BaseMailer, lambda c: (
+            SmtpMailer(settings.mail) if settings.mail.host else NullMailer()))
+        c.register_singleton(BaseMediaStorage, lambda c: LocalMediaStorage(
+            settings.media.dir))
 
     def _build_database(self) -> BaseDatabaseManager:
         db = self._settings.database
@@ -141,7 +159,8 @@ class ApplicationBuilder:
         c = self._container
         for repo_type in (UserRepository, MenuRepository, LogRepository,
                           ContentRepository, DbConnectionRepository,
-                          SettingRepository, TrafficRepository):
+                          SettingRepository, TrafficRepository,
+                          ContactRepository):
             c.register_singleton(
                 repo_type,
                 lambda c, rt=repo_type: rt(c.resolve(BaseDatabaseManager)))
@@ -163,6 +182,15 @@ class ApplicationBuilder:
             c.resolve(ContentRepository)))
         c.register_singleton(TrafficService, lambda c: TrafficService(
             c.resolve(TrafficRepository)))
+        c.register_singleton(ContactService, lambda c: ContactService(
+            c.resolve(ContactRepository), c.resolve(LogRepository),
+            c.resolve(BaseMailer), admin_email=self._settings.mail.admin_email))
+        c.register_singleton(MediaService, lambda c: MediaService(
+            c.resolve(BaseMediaStorage), c.resolve(LogRepository),
+            max_upload_mb=self._settings.media.max_upload_mb))
+        c.register_singleton(BackupService, lambda c: BackupService(
+            c.resolve(BaseDatabaseManager), self._settings.database.path,
+            c.resolve(LogRepository)))
         c.register_singleton(SiteSettingsService, lambda c: SiteSettingsService(
             c.resolve(SettingRepository), c.resolve(BaseCacheManager),
             c.resolve(LogRepository)))
@@ -200,7 +228,7 @@ class ApplicationBuilder:
         registry.register(CacheWarmupJob(c.resolve(MenuService), cache))
         registry.register(TrafficFlushJob(c.resolve(TrafficService)))
         registry.register(DatabaseOptimizeJob(db))
-        registry.register(DatabaseBackupJob(db, self._settings.database.path))
+        registry.register(DatabaseBackupJob(c.resolve(BackupService)))
         registry.register(IdleConnectionCloserJob(
             db, self._settings.database.idle_timeout_seconds))
         return SchedulerEngine(registry, self._settings.scheduler.tick_seconds,
@@ -297,24 +325,39 @@ class ApplicationBuilder:
                 PublicWebController(settings, c.resolve(MenuService),
                                     c.resolve(ContentService), c.resolve(SearchService)),
                 PublicApiController(c.resolve(MenuService), c.resolve(ContentService),
-                                    c.resolve(SearchService)),
+                                    c.resolve(SearchService), c.resolve(ContactService)),
             ]
 
         if settings.has_module(MODULE_ADMIN):
             auth_handler = c.resolve(BaseAuthHandler)
             auth_service = c.resolve(AuthService)
+            deps = AdminWebDeps(
+                menus=c.resolve(MenuService),
+                users=c.resolve(UserService),
+                dashboard=c.resolve(DashboardService),
+                system=c.resolve(SystemService),
+                logs=c.resolve(LogRepository),
+                contents=c.resolve(ContentService),
+                site_settings=c.resolve(SiteSettingsService),
+                contact=c.resolve(ContactService),
+                media=c.resolve(MediaService),
+                backups=c.resolve(BackupService),
+                engine=engine,
+            )
             controllers += [
-                AdminWebController(settings, auth_handler, c.resolve(MenuService),
-                                   c.resolve(UserService), c.resolve(DashboardService),
-                                   c.resolve(SystemService), c.resolve(LogRepository),
-                                   c.resolve(ContentService),
-                                   c.resolve(SiteSettingsService), engine),
+                AdminWebController(settings, auth_handler, deps),
                 AdminAuthApiController(auth_handler, auth_service,
                                        cookie_secure=settings.is_production),
                 AdminUserApiController(auth_handler, auth_service, c.resolve(UserService)),
                 AdminMenuApiController(auth_handler, auth_service, c.resolve(MenuService)),
                 AdminContentApiController(auth_handler, auth_service,
                                           c.resolve(ContentService)),
+                AdminContactApiController(auth_handler, auth_service,
+                                          c.resolve(ContactService)),
+                AdminMediaApiController(auth_handler, auth_service,
+                                        c.resolve(MediaService)),
+                AdminBackupApiController(auth_handler, auth_service,
+                                         c.resolve(BackupService)),
                 AdminLogApiController(auth_handler, auth_service, c.resolve(LogRepository)),
                 AdminDashboardApiController(auth_handler, auth_service,
                                             c.resolve(DashboardService)),
@@ -323,6 +366,11 @@ class ApplicationBuilder:
                 AdminSystemApiController(auth_handler, auth_service,
                                          c.resolve(SystemService), engine),
             ]
+
+        # Media files are served wherever a web surface exists (content images
+        # on the public site, previews in the admin area).
+        if settings.has_module(MODULE_PUBLIC) or settings.has_module(MODULE_ADMIN):
+            controllers.append(MediaWebController(c.resolve(MediaService)))
 
         for controller in controllers:
             app.include_router(controller.build_router())

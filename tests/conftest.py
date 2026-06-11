@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,6 +11,7 @@ from app.config.settings import (
     AppSettings,
     CacheSettings,
     DatabaseSettings,
+    MediaSettings,
     RateLimitSettings,
     SchedulerSettings,
     SecuritySettings,
@@ -21,6 +24,8 @@ def build_test_settings(db_path: str,
                         login_max_requests: int = 1_000) -> AppSettings:
     return AppSettings(
         modules=modules,
+        # media files land next to the test DB, never in the repo tree
+        media=MediaSettings(dir=str(Path(db_path).parent / "media"), max_upload_mb=1),
         name="TestApp",
         environment=environment,
         debug=True,

@@ -9,7 +9,8 @@ SPA/automation clients use the `Authorization: Bearer` header instead.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 
 from app.core.exceptions import ConflictError, NotFoundError, SchedulerError
@@ -25,8 +26,11 @@ from app.infrastructure.auth.manager import (
 )
 from app.repositories.log_repository import LogRepository
 from app.services.auth_service import AuthService
+from app.services.backup_service import BackupService
+from app.services.contact_service import ContactService
 from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
+from app.services.media_service import MediaService
 from app.services.menu_service import MenuService
 from app.services.site_settings_service import SiteSettingsService
 from app.services.system_service import SystemService
@@ -193,6 +197,13 @@ class AdminUserApiController(AdminApiController):
             self._users.delete(user_id, actor=self._actor_name(user))
             return self.ok({"deleted": user_id})
 
+        @router.post("/{user_id}/revoke-sessions")
+        def revoke_sessions(user_id: int,
+                            user: CurrentUser = Depends(self._guard)) -> dict:
+            revoked = self._users.revoke_sessions(user_id,
+                                                  actor=self._actor_name(user))
+            return self.ok({"revoked": revoked.username})
+
     @staticmethod
     def _to_input(payload: UserRequest) -> UserInput:
         return UserInput(username=payload.username, email=str(payload.email),
@@ -271,6 +282,92 @@ class AdminContentApiController(AdminApiController):
         def delete_content(content_id: int, user: CurrentUser = Depends(self._guard)) -> dict:
             self._contents.delete(content_id, actor=self._actor_name(user))
             return self.ok({"deleted": content_id})
+
+
+class AdminContactApiController(AdminApiController):
+    prefix = "/api/admin/messages"
+
+    def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
+                 contact: ContactService) -> None:
+        super().__init__(auth_handler, auth_service)
+        self._contact = contact
+
+    def _register(self, router: APIRouter) -> None:
+        @router.get("")
+        def list_messages(page: int = Query(1, ge=1), size: int = Query(20, ge=1, le=100),
+                          unread_only: bool = False,
+                          user: CurrentUser = Depends(self._guard)) -> dict:
+            result = self._contact.list_messages(PageRequest.create(page, size),
+                                                 unread_only=unread_only)
+            return self.paginated(result, lambda m: m.to_dict())
+
+        @router.post("/{message_id}/read")
+        def mark_read(message_id: int, user: CurrentUser = Depends(self._guard)) -> dict:
+            entry = self._contact.mark_read(message_id, actor=self._actor_name(user))
+            return self.ok(entry.to_dict())
+
+        @router.delete("/{message_id}")
+        def delete_message(message_id: int,
+                           user: CurrentUser = Depends(self._guard)) -> dict:
+            self._contact.delete(message_id, actor=self._actor_name(user))
+            return self.ok({"deleted": message_id})
+
+
+class AdminMediaApiController(AdminApiController):
+    prefix = "/api/admin/media"
+
+    def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
+                 media: MediaService) -> None:
+        super().__init__(auth_handler, auth_service)
+        self._media = media
+
+    def _register(self, router: APIRouter) -> None:
+        @router.get("")
+        def list_files(user: CurrentUser = Depends(self._guard)) -> dict:
+            return self.ok(self._media.list_files())
+
+        @router.post("", status_code=201)
+        async def upload(file: UploadFile = File(...),
+                         user: CurrentUser = Depends(self._guard)) -> dict:
+            data = await file.read()
+            stored = self._media.save_upload(file.filename or "unnamed", data,
+                                             actor=self._actor_name(user))
+            return self.ok(stored)
+
+        @router.delete("/{name}")
+        def delete_file(name: str, user: CurrentUser = Depends(self._guard)) -> dict:
+            self._media.delete(name, actor=self._actor_name(user))
+            return self.ok({"deleted": name})
+
+
+class AdminBackupApiController(AdminApiController):
+    prefix = "/api/admin/backups"
+
+    def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
+                 backups: BackupService) -> None:
+        super().__init__(auth_handler, auth_service)
+        self._backups = backups
+
+    def _register(self, router: APIRouter) -> None:
+        @router.get("")
+        def list_backups(user: CurrentUser = Depends(self._guard)) -> dict:
+            return self.ok({"supported": self._backups.supported,
+                            "backups": self._backups.list_backups()})
+
+        @router.post("", status_code=201)
+        def create_backup(user: CurrentUser = Depends(self._guard)) -> dict:
+            return self.ok(self._backups.create(actor=self._actor_name(user)))
+
+        @router.get("/{name}/download")
+        def download(name: str, user: CurrentUser = Depends(self._guard)) -> FileResponse:
+            path = self._backups.path_for(name)
+            return FileResponse(path, filename=name,
+                                media_type="application/octet-stream")
+
+        @router.delete("/{name}")
+        def delete_backup(name: str, user: CurrentUser = Depends(self._guard)) -> dict:
+            self._backups.delete(name, actor=self._actor_name(user))
+            return self.ok({"deleted": name})
 
 
 class AdminLogApiController(AdminApiController):

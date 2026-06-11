@@ -101,6 +101,18 @@ class ContentItem(BaseEntity):
 
 
 @dataclass(slots=True)
+class ContactMessage(BaseEntity):
+    """A message submitted through the public contact form."""
+
+    name: str = ""
+    email: str = ""
+    subject: str = ""
+    message: str = ""
+    ip_hash: str = ""              # anonymous sender hash, never the raw IP
+    is_read: bool = False
+
+
+@dataclass(slots=True)
 class SettingEntry(BaseEntity):
     """A single key-value system setting, editable from the admin area."""
 

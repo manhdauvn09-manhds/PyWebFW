@@ -5,11 +5,12 @@ Adding an admin screen: subclass AdminPage, add one entry in AdminWebController.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable
 from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from app.config.settings import AppSettings
 from app.core.exceptions import AuthenticationError, AuthorizationError
@@ -18,8 +19,11 @@ from app.domain.models import MenuArea, Role
 from app.infrastructure.auth.manager import BaseAuthHandler, CurrentUser
 from app.repositories.log_repository import LogRepository
 from app.scheduler.engine import SchedulerEngine
+from app.services.backup_service import BackupService
+from app.services.contact_service import ContactService
 from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
+from app.services.media_service import MediaService
 from app.services.menu_service import MenuService
 from app.services.search_service import SearchService
 from app.services.site_settings_service import SiteSettingsService
@@ -29,12 +33,16 @@ from app.web.pages.admin import (
     AdminHomePage,
     AdminLoginPage,
     AdminPasswordChangePage,
+    BackupManagerPage,
+    ContactMessagesPage,
     ContentManagementPage,
     DashboardPage,
     DbConnectionManagementPage,
     JobsMonitorPage,
     LogManagementPage,
+    MediaManagerPage,
     MenuManagementPage,
+    SessionManagerPage,
     SettingsPage,
     UserManagementPage,
 )
@@ -143,39 +151,55 @@ class PublicWebController(BaseController):
                 f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>')
 
 
+@dataclass(frozen=True)
+class AdminWebDeps:
+    """Service bundle for the admin area — one new screen = one new field
+    here instead of another constructor parameter."""
+
+    menus: MenuService
+    users: UserService
+    dashboard: DashboardService
+    system: SystemService
+    logs: LogRepository
+    contents: ContentService
+    site_settings: SiteSettingsService
+    contact: ContactService
+    media: MediaService
+    backups: BackupService
+    engine: SchedulerEngine | None = None
+
+
+class MediaWebController(BaseController):
+    """Serves uploaded media files. Registered for both the public site
+    (content images) and the admin area (previews)."""
+
+    tags = ["media"]
+
+    def __init__(self, media: MediaService) -> None:
+        self._media = media
+
+    def _register(self, router: APIRouter) -> None:
+        @router.get("/media/{name}", include_in_schema=False)
+        def serve_media(name: str) -> FileResponse:
+            path = self._media.resolve_path(name)   # strict name validation
+            return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
+
 class AdminWebController(BaseController):
     prefix = "/admin"
     tags = ["admin-web"]
 
-    def __init__(
-        self,
-        settings: AppSettings,
-        auth_handler: BaseAuthHandler,
-        menus: MenuService,
-        users: UserService,
-        dashboard: DashboardService,
-        system: SystemService,
-        logs: LogRepository,
-        contents: ContentService,
-        site_settings: SiteSettingsService,
-        engine: SchedulerEngine | None = None,
-    ) -> None:
+    def __init__(self, settings: AppSettings, auth_handler: BaseAuthHandler,
+                 deps: AdminWebDeps) -> None:
         self._settings = settings
         self._auth = auth_handler
-        self._menus = menus
-        self._users = users
-        self._dashboard = dashboard
-        self._system = system
-        self._logs = logs
-        self._contents = contents
-        self._site_settings = site_settings
-        self._engine = engine
+        self._deps = deps
 
     def _context(self, request: Request, user: CurrentUser | None) -> PageContext:
         return PageContext(
             site_name=self._settings.name,
             path=request.url.path,
-            menu_items=self._menus.get_menu(MenuArea.ADMIN) if user else (),
+            menu_items=self._deps.menus.get_menu(MenuArea.ADMIN) if user else (),
             query=dict(request.query_params),
             user=user,
             csp_nonce=getattr(request.state, "csp_nonce", ""),
@@ -197,16 +221,21 @@ class AdminWebController(BaseController):
                                   lambda ctx: AdminPasswordChangePage(ctx),
                                   allow_pending_password=True)
 
+        deps = self._deps
         protected: dict[str, PageFactory] = {
             "": lambda ctx: AdminHomePage(ctx),
-            "/dashboard": lambda ctx: DashboardPage(ctx, self._dashboard),
-            "/users": lambda ctx: UserManagementPage(ctx, self._users),
-            "/menus": lambda ctx: MenuManagementPage(ctx, self._menus),
-            "/contents": lambda ctx: ContentManagementPage(ctx, self._contents),
-            "/jobs": lambda ctx: JobsMonitorPage(ctx, self._engine),
-            "/settings": lambda ctx: SettingsPage(ctx, self._site_settings),
-            "/logs": lambda ctx: LogManagementPage(ctx, self._logs),
-            "/db-connections": lambda ctx: DbConnectionManagementPage(ctx, self._system),
+            "/dashboard": lambda ctx: DashboardPage(ctx, deps.dashboard),
+            "/users": lambda ctx: UserManagementPage(ctx, deps.users),
+            "/menus": lambda ctx: MenuManagementPage(ctx, deps.menus),
+            "/contents": lambda ctx: ContentManagementPage(ctx, deps.contents),
+            "/messages": lambda ctx: ContactMessagesPage(ctx, deps.contact),
+            "/media": lambda ctx: MediaManagerPage(ctx, deps.media),
+            "/jobs": lambda ctx: JobsMonitorPage(ctx, deps.engine),
+            "/settings": lambda ctx: SettingsPage(ctx, deps.site_settings),
+            "/sessions": lambda ctx: SessionManagerPage(ctx, deps.users, deps.logs),
+            "/backups": lambda ctx: BackupManagerPage(ctx, deps.backups),
+            "/logs": lambda ctx: LogManagementPage(ctx, deps.logs),
+            "/db-connections": lambda ctx: DbConnectionManagementPage(ctx, deps.system),
         }
         for path, factory in protected.items():
             self._add_protected_route(router, path, factory)
