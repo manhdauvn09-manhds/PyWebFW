@@ -166,7 +166,25 @@
     <tr><td>FR-SCH-04</td><td>CacheWarmupJob — purge entry hết hạn + warm menu</td><td>240s</td><td>—</td></tr>
     <tr><td>FR-SCH-05</td><td>DatabaseOptimizeJob — ANALYZE / PRAGMA optimize</td><td>03:30 hằng ngày</td><td>—</td></tr>
     <tr><td>FR-SCH-06</td><td>IdleConnectionCloserJob — đóng kết nối idle quá timeout cấu hình</td><td>60s</td><td>—</td></tr>
-    <tr><td>FR-SCH-07</td><td>Mỗi lần chạy job ghi JobResult (status, duration, attempts) vào audit log; engine có <code>status_report</code> và <code>run_job_now()</code></td><td colspan="2">—</td></tr>
+    <tr><td>FR-SCH-07</td><td>TrafficFlushJob — ghi batch số liệu truy cập</td><td>60s</td><td>—</td></tr>
+    <tr><td>FR-SCH-08</td><td>DatabaseBackupJob — snapshot VACUUM INTO, giữ 7 bản mới nhất</td><td>02:30 hằng ngày</td><td>2 lần / 5s</td></tr>
+    <tr><td>FR-SCH-09</td><td>Mỗi lần chạy job ghi JobResult (status, duration, attempts) vào audit log; engine có <code>status_report</code> và <code>run_job_now()</code>; job FAILED publish event <code>job.failed</code> (cảnh báo email nếu cấu hình MAIL_ADMIN_EMAIL)</td><td colspan="2">—</td></tr>
+  </table>
+
+  <h3>3.6 Các yêu cầu bổ sung (Batch 1–3)</h3>
+  <table>
+    <tr><th>ID</th><th>Yêu cầu</th><th>Ưu tiên</th></tr>
+    <tr><td>FR-TRF-01</td><td>Đếm page view public (không đếm /api, /admin, /healthz, lỗi, request bị chặn); unique visitor theo hash sha256(IP|UA|ngày) — không lưu IP thô; số người online (cửa sổ 5 phút); Dashboard hiển thị Online/Views Today/biểu đồ 7 ngày/top trang</td><td><span class="badge amber">Cao</span></td></tr>
+    <tr><td>FR-CMS-01</td><td>Quản trị Contents: CRUD + form editor; route catch-all <code>/{slug}</code> phục vụ content mới ngay; đổi slug tự sinh redirect 301</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-SET-01</td><td>System Settings key-value runtime (whitelist); maintenance mode: site public trả 503 + Retry-After, /admin và /healthz vẫn truy cập được</td><td><span class="badge amber">Cao</span></td></tr>
+    <tr><td>FR-CNT-01</td><td>Contact form public: honeypot drop thầm, throttle 3 tin/10 phút/IP, hộp thư admin (đọc/xóa/export), notify email best-effort qua event bus</td><td><span class="badge amber">Cao</span></td></tr>
+    <tr><td>FR-MED-01</td><td>Media: upload whitelist (jpg/png/gif/webp/pdf) + size cap, tên lưu random hex, phục vụ tại /media/&lt;tên&gt;, chặn path traversal</td><td><span class="badge amber">Cao</span></td></tr>
+    <tr><td>FR-SES-01</td><td>Session Manager: last-login mỗi user + thu hồi mọi token (token_version)</td><td><span class="badge amber">Cao</span></td></tr>
+    <tr><td>FR-BAK-01</td><td>Backup Manager: tạo thủ công/tải về/xóa, validate tên file chặt; chỉ hỗ trợ SQLite file-based</td><td><span class="badge amber">Cao</span></td></tr>
+    <tr><td>FR-RED-01</td><td>Redirect Manager: quy tắc 301/302 + hit counter, resolve chỉ trên đường 404, chống self-loop/trùng</td><td><span class="badge amber">Cao</span></td></tr>
+    <tr><td>FR-2FA-01</td><td>2FA TOTP (RFC 6238) cho admin: setup/enable/disable có xác nhận mã; login yêu cầu OTP khi bật (handshake <code>otp_required</code>); secret không bao giờ trả ra API</td><td><span class="badge red">Bắt buộc</span></td></tr>
+    <tr><td>FR-EXP-01</td><td>Export CSV (users/logs/messages): chống formula injection, mọi lần export có audit</td><td><span class="badge gray">Vừa</span></td></tr>
+    <tr><td>FR-EVT-01</td><td>Event bus in-process: publish/subscribe, handler cách ly lỗi, wiring tập trung ở bootstrap</td><td><span class="badge amber">Cao</span></td></tr>
   </table>
 </section>
 
@@ -246,8 +264,18 @@
     <text x="560" y="100" class="t-small">idx_audit_created (created_at) — cleanup &amp; trang log</text>
     <text x="560" y="120" class="t-small">idx_contents_published (is_published, slug) — public read path</text>
   </svg>
-  <figcaption>Hình 5.1 — Mô hình dữ liệu: 5 bảng độc lập cao (low coupling), liên kết logic qua actor/username.</figcaption>
+  <figcaption>Hình 5.1 — Mô hình dữ liệu lõi: 5 bảng độc lập cao (low coupling), liên kết logic qua actor/username.</figcaption>
   </figure>
+  <h3>Các bảng bổ sung (Batch 1–3)</h3>
+  <table>
+    <tr><th>Bảng</th><th>Cột chính</th><th>Phục vụ</th></tr>
+    <tr><td><code>system_settings</code></td><td>key UQ · value</td><td>Cấu hình runtime + maintenance mode</td></tr>
+    <tr><td><code>traffic_stats</code></td><td>day + path UQ · hits (upsert cộng dồn)</td><td>Page views theo ngày/trang</td></tr>
+    <tr><td><code>traffic_daily</code></td><td>day UQ · uniques (max-monotonic)</td><td>Unique visitors/ngày</td></tr>
+    <tr><td><code>contact_messages</code></td><td>name · email · subject · message · ip_hash · is_read</td><td>Hộp thư liên hệ</td></tr>
+    <tr><td><code>redirects</code></td><td>from_path UQ · to_path · status_code · hits · is_active</td><td>Quy tắc 301/302</td></tr>
+    <tr><td><code>users</code> (cột mới)</td><td>token_version · must_change_password · totp_secret · totp_enabled</td><td>Thu hồi token, ép đổi mật khẩu, 2FA — migrate tự động cho DB cũ</td></tr>
+  </table>
 </section>
 
 <section class="card">

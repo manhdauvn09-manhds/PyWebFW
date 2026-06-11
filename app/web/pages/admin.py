@@ -25,6 +25,7 @@ from app.services.user_service import UserService
 from app.repositories.log_repository import LogRepository
 from app.web.components import (
     BarChartComponent,
+    PaginationComponent,
     SeoMeta,
     StatCardWidget,
     TableComponent,
@@ -266,7 +267,47 @@ class DashboardPage(AdminPage):
                 f"<h2>Recent activity</h2>{recent.render()}")
 
 
+_USER_FORM_SCRIPT = """
+<script nonce="__NONCE__">
+const uForm = document.getElementById('user-form');
+const uField = (name) => uForm.elements[name];
+uForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = uForm.querySelector('.form-message');
+  const id = uForm.dataset.userId;
+  const payload = {
+    username: uField('username').value, email: uField('email').value,
+    role: uField('role').value, is_active: uField('is_active').checked,
+  };
+  if (uField('password').value) { payload.password = uField('password').value; }
+  const res = await fetch(id ? `/api/admin/users/${id}` : '/api/admin/users', {
+    method: id ? 'PUT' : 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+    body: JSON.stringify(payload),
+  });
+  const result = await res.json();
+  if (result.success) { window.location = '/admin/users'; }
+  else { message.textContent = result.error?.message || 'Save failed'; }
+});
+const uDelete = document.getElementById('user-delete');
+if (uDelete) uDelete.addEventListener('click', async () => {
+  if (!confirm('Delete this user?')) return;
+  const res = await fetch(`/api/admin/users/${uDelete.dataset.userId}`, {
+    method: 'DELETE', headers: {'X-Requested-With': 'fetch'},
+  });
+  const result = await res.json();
+  if (result.success) { window.location = '/admin/users'; }
+  else { uForm.querySelector('.form-message').textContent = result.error?.message; }
+});
+</script>
+"""
+
+_ROLES = ("admin", "editor", "viewer")
+
+
 class UserManagementPage(AdminPage):
+    PAGE_SIZE = 20
+
     def __init__(self, ctx: PageContext, users: UserService) -> None:
         super().__init__(ctx)
         self._users = users
@@ -276,19 +317,102 @@ class UserManagementPage(AdminPage):
         return "User Management"
 
     def build_content(self) -> str:
-        result = self._users.list_users(PageRequest.create(size=50))
-        table = TableComponent(
-            ["ID", "Username", "Email", "Role", "Active", "Created"],
-            [(u.id, u.username, u.email, u.role.value,
-              "yes" if u.is_active else "no", u.created_at) for u in result.items],
+        page = self.query_int("page")
+        result = self._users.list_users(PageRequest.create(page=page, size=self.PAGE_SIZE))
+        rows = "".join(
+            f"<tr><td>{esc(u.id)}</td><td>{esc(u.username)}</td><td>{esc(u.email)}</td>"
+            f"<td>{esc(u.role.value)}</td><td>{'yes' if u.is_active else 'no'}</td>"
+            f"<td>{'on' if u.totp_enabled else 'off'}</td>"
+            f'<td><a href="/admin/users?edit={esc(u.id)}">Edit</a></td></tr>'
+            for u in result.items
         )
-        return (f"<h1>Users ({result.total})</h1>"
-                '<p><a href="/api/admin/users/export">Export CSV</a></p>'
-                f"{table.render()}"
-                "<p>Create/update/delete via <code>/api/admin/users</code>.</p>")
+        parts = [
+            f"<h1>Users ({result.total})</h1>",
+            '<p><a href="/admin/users?new=1">+ New user</a> · '
+            '<a href="/api/admin/users/export">Export CSV</a></p>',
+            '<table class="data-table"><thead><tr><th>ID</th><th>Username</th>'
+            "<th>Email</th><th>Role</th><th>Active</th><th>2FA</th><th></th></tr></thead>"
+            f"<tbody>{rows}</tbody></table>",
+            PaginationComponent(result.page, result.pages, "/admin/users").render(),
+        ]
+        edit_id = self._ctx.query.get("edit", "")
+        if self._ctx.query.get("new") is not None:
+            parts.append(self._form(None))
+        elif edit_id.isdigit():
+            try:
+                parts.append(self._form(self._users.get(int(edit_id))))
+            except NotFoundError:
+                parts.append("<p>User not found.</p>")
+        return "".join(parts)
+
+    def _form(self, user) -> str:
+        value = lambda attr: esc(getattr(user, attr)) if user else ""
+        role_value = user.role.value if user else "viewer"
+        options = "".join(
+            f'<option value="{r}"{" selected" if r == role_value else ""}>{r}</option>'
+            for r in _ROLES)
+        checked = " checked" if (user is None or user.is_active) else ""
+        id_attr = f' data-user-id="{esc(user.id)}"' if user else ""
+        delete_btn = (f'<button type="button" id="user-delete"'
+                      f' data-user-id="{esc(user.id)}">Delete</button>' if user else "")
+        pw_label = ("Password (leave blank to keep current)" if user
+                    else "Password (min 8 chars)")
+        pw_required = "" if user else " required"
+        heading = f"Edit: {esc(user.username)}" if user else "New user"
+        script = _USER_FORM_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
+        return (
+            f"<h2>{heading}</h2>"
+            f'<form id="user-form" class="app-form"{id_attr}>'
+            f'<label>Username<input name="username" value="{value("username")}"'
+            ' required minlength="3"></label>'
+            f'<label>Email<input name="email" type="email" value="{value("email")}" required></label>'
+            f'<label>{pw_label}<input name="password" type="password" minlength="8"{pw_required}></label>'
+            f'<label>Role<select name="role">{options}</select></label>'
+            f'<label><input type="checkbox" name="is_active"{checked}> Active</label>'
+            f"<button type=\"submit\">Save</button> {delete_btn}"
+            '<div class="form-message" role="alert"></div></form>'
+            f"{script}"
+        )
+
+
+_MENU_FORM_SCRIPT = """
+<script nonce="__NONCE__">
+const mForm = document.getElementById('menu-form');
+const mField = (name) => mForm.elements[name];
+mForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = mForm.querySelector('.form-message');
+  const id = mForm.dataset.menuId;
+  const payload = {
+    title: mField('title').value, url: mField('url').value,
+    area: mField('area').value,
+    position: parseInt(mField('position').value, 10) || 0,
+    is_active: mField('is_active').checked,
+  };
+  const res = await fetch(id ? `/api/admin/menus/${id}` : '/api/admin/menus', {
+    method: id ? 'PUT' : 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+    body: JSON.stringify(payload),
+  });
+  const result = await res.json();
+  if (result.success) { window.location = '/admin/menus'; }
+  else { message.textContent = result.error?.message || 'Save failed'; }
+});
+const mDelete = document.getElementById('menu-delete');
+if (mDelete) mDelete.addEventListener('click', async () => {
+  if (!confirm('Delete this menu item?')) return;
+  const res = await fetch(`/api/admin/menus/${mDelete.dataset.menuId}`, {
+    method: 'DELETE', headers: {'X-Requested-With': 'fetch'},
+  });
+  if ((await res.json()).success) { window.location = '/admin/menus'; }
+});
+</script>
+"""
 
 
 class MenuManagementPage(AdminPage):
+    PAGE_SIZE = 50
+
     def __init__(self, ctx: PageContext, menus: MenuService) -> None:
         super().__init__(ctx)
         self._menus = menus
@@ -298,13 +422,58 @@ class MenuManagementPage(AdminPage):
         return "Menu Management"
 
     def build_content(self) -> str:
-        result = self._menus.list_menus(PageRequest.create(size=100))
-        table = TableComponent(
-            ["ID", "Title", "URL", "Area", "Position", "Active"],
-            [(m.id, m.title, m.url, m.area.value, m.position,
-              "yes" if m.is_active else "no") for m in result.items],
+        page = self.query_int("page")
+        result = self._menus.list_menus(PageRequest.create(page=page, size=self.PAGE_SIZE))
+        rows = "".join(
+            f"<tr><td>{esc(m.id)}</td><td>{esc(m.title)}</td><td>{esc(m.url)}</td>"
+            f"<td>{esc(m.area.value)}</td><td>{esc(m.position)}</td>"
+            f"<td>{'yes' if m.is_active else 'no'}</td>"
+            f'<td><a href="/admin/menus?edit={esc(m.id)}">Edit</a></td></tr>'
+            for m in result.items
         )
-        return f"<h1>Menus ({result.total})</h1>{table.render()}"
+        parts = [
+            f"<h1>Menus ({result.total})</h1>",
+            '<p><a href="/admin/menus?new=1">+ New menu item</a></p>',
+            '<table class="data-table"><thead><tr><th>ID</th><th>Title</th>'
+            "<th>URL</th><th>Area</th><th>Position</th><th>Active</th><th></th>"
+            f"</tr></thead><tbody>{rows}</tbody></table>",
+            PaginationComponent(result.page, result.pages, "/admin/menus").render(),
+        ]
+        edit_id = self._ctx.query.get("edit", "")
+        if self._ctx.query.get("new") is not None:
+            parts.append(self._form(None))
+        elif edit_id.isdigit():
+            try:
+                parts.append(self._form(self._menus.get(int(edit_id))))
+            except NotFoundError:
+                parts.append("<p>Menu item not found.</p>")
+        return "".join(parts)
+
+    def _form(self, item) -> str:
+        value = lambda attr: esc(getattr(item, attr)) if item else ""
+        area_value = item.area.value if item else "public"
+        options = "".join(
+            f'<option value="{a}"{" selected" if a == area_value else ""}>{a}</option>'
+            for a in ("public", "admin"))
+        checked = " checked" if (item is None or item.is_active) else ""
+        id_attr = f' data-menu-id="{esc(item.id)}"' if item else ""
+        delete_btn = (f'<button type="button" id="menu-delete"'
+                      f' data-menu-id="{esc(item.id)}">Delete</button>' if item else "")
+        position = esc(item.position) if item else "0"
+        heading = f"Edit: {esc(item.title)}" if item else "New menu item"
+        script = _MENU_FORM_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
+        return (
+            f"<h2>{heading}</h2>"
+            f'<form id="menu-form" class="app-form"{id_attr}>'
+            f'<label>Title<input name="title" value="{value("title")}" required></label>'
+            f'<label>URL<input name="url" value="{value("url")}" required></label>'
+            f'<label>Area<select name="area">{options}</select></label>'
+            f'<label>Position<input name="position" type="number" value="{position}"></label>'
+            f'<label><input type="checkbox" name="is_active"{checked}> Active</label>'
+            f"<button type=\"submit\">Save</button> {delete_btn}"
+            '<div class="form-message" role="alert"></div></form>'
+            f"{script}"
+        )
 
 
 class LogManagementPage(AdminPage):
@@ -317,7 +486,8 @@ class LogManagementPage(AdminPage):
         return "System Logs"
 
     def build_content(self) -> str:
-        result = self._logs.list_page(PageRequest.create(size=50))
+        page = self.query_int("page")
+        result = self._logs.list_page(PageRequest.create(page=page, size=50))
         table = TableComponent(
             ["Time", "Actor", "Action", "Target", "Detail", "Level"],
             [(l.created_at, l.actor, l.action, l.target, l.detail, l.level)
@@ -325,7 +495,8 @@ class LogManagementPage(AdminPage):
         )
         return (f"<h1>Audit / Action Logs ({result.total})</h1>"
                 '<p><a href="/api/admin/logs/export">Export CSV</a></p>'
-                f"{table.render()}")
+                f"{table.render()}"
+                f"{PaginationComponent(result.page, result.pages, '/admin/logs').render()}")
 
 
 _CONTENT_FORM_SCRIPT = """
@@ -387,7 +558,8 @@ class ContentManagementPage(AdminPage):
         return "".join(parts)
 
     def _listing(self) -> str:
-        result = self._contents.list_contents(PageRequest.create(size=100))
+        page = self.query_int("page")
+        result = self._contents.list_contents(PageRequest.create(page=page, size=50))
         rows = "".join(
             f"<tr><td>{esc(item.id)}</td><td>{esc(item.slug)}</td>"
             f"<td>{esc(item.title)}</td>"
@@ -400,7 +572,8 @@ class ContentManagementPage(AdminPage):
                 '<p><a href="/admin/contents?new=1">+ New content</a></p>'
                 '<table class="data-table"><thead><tr><th>ID</th><th>Slug</th>'
                 "<th>Title</th><th>Published</th><th>Updated</th><th></th></tr></thead>"
-                f"<tbody>{rows}</tbody></table>")
+                f"<tbody>{rows}</tbody></table>"
+                f"{PaginationComponent(result.page, result.pages, '/admin/contents').render()}")
 
     def _form(self, item: ContentItem | None) -> str:
         value = lambda attr: esc(getattr(item, attr)) if item else ""
@@ -573,7 +746,8 @@ class ContactMessagesPage(AdminPage):
         return "Contact Messages"
 
     def build_content(self) -> str:
-        result = self._contact.list_messages(PageRequest.create(size=50))
+        page = self.query_int("page")
+        result = self._contact.list_messages(PageRequest.create(page=page, size=50))
         rows = "".join(
             f"<tr><td>{esc(m.created_at)}</td><td>{esc(m.name)}</td>"
             f"<td>{esc(m.email)}</td><td>{esc(m.subject)}</td>"
@@ -589,6 +763,7 @@ class ContactMessagesPage(AdminPage):
                 '<table class="data-table"><thead><tr><th>Date</th><th>Name</th>'
                 "<th>Email</th><th>Subject</th><th>Message</th><th>Status</th><th></th>"
                 f"</tr></thead><tbody>{rows}</tbody></table>"
+                f"{PaginationComponent(result.page, result.pages, '/admin/messages').render()}"
                 f"{_action_script(self._ctx.csp_nonce)}")
 
 
@@ -751,7 +926,8 @@ class RedirectManagementPage(AdminPage):
         return "Redirects"
 
     def build_content(self) -> str:
-        result = self._redirects.list_redirects(PageRequest.create(size=100))
+        page = self.query_int("page")
+        result = self._redirects.list_redirects(PageRequest.create(page=page, size=50))
         rows = "".join(
             f"<tr><td>{esc(r.from_path)}</td><td>{esc(r.to_path)}</td>"
             f"<td>{esc(r.status_code)}</td><td>{esc(r.hits)}</td>"
@@ -775,6 +951,7 @@ class RedirectManagementPage(AdminPage):
                 '<table class="data-table"><thead><tr><th>From</th><th>To</th>'
                 "<th>Code</th><th>Hits</th><th>Active</th><th></th></tr></thead>"
                 f"<tbody>{rows}</tbody></table>"
+                f"{PaginationComponent(result.page, result.pages, '/admin/redirects').render()}"
                 f"{form_script}{_action_script(self._ctx.csp_nonce)}")
 
 

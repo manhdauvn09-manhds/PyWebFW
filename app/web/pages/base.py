@@ -41,6 +41,12 @@ class BasePage(ABC):
     @abstractmethod
     def build_content(self) -> str: ...
 
+    # --- shared helpers ------------------------------------------------------
+    def query_int(self, key: str, default: int = 1) -> int:
+        """Safe positive-int query parameter (page numbers etc.)."""
+        raw = self._ctx.query.get(key, "")
+        return int(raw) if raw.isdigit() and int(raw) > 0 else default
+
     # --- overridable defaults ----------------------------------------------
     def seo(self) -> SeoMeta:
         return SeoMeta(title=f"{self.title} — {self._ctx.site_name}")

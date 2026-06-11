@@ -61,7 +61,9 @@
       <tr><td>Database mặc định</td><td>SQLite (pool + idle-close) sau ABC <code>BaseDatabaseManager</code> — thay Postgres/MySQL không sửa tầng trên</td></tr>
       <tr><td>Triển khai</td><td><code>APP_MODULES</code> = <span class="badge green">public</span> <span class="badge">admin</span> <span class="badge gray">scheduler</span> — gộp hoặc tách container</td></tr>
       <tr><td>Cổng mặc định</td><td>FE :8001 · Admin :8002 · All-in-one :8000 · Scheduler: chỉ <code>/healthz</code> nội bộ</td></tr>
-      <tr><td>Kiểm thử</td><td>21 test end-to-end (pytest) qua HTTP stack thật</td></tr>
+      <tr><td>Kiểm thử</td><td>69 test end-to-end (pytest) qua HTTP stack thật + GitHub Actions CI</td></tr>
+      <tr><td>Admin</td><td>14 màn hình quản trị · 2FA TOTP · ép đổi mật khẩu lần đầu · thu hồi token tức thì</td></tr>
+      <tr><td>Tự động hóa</td><td>8 scheduler jobs (health, backup, optimize, traffic, cleanup…) + event bus</td></tr>
       <tr><td>Deploy scripts</td><td><code>deploy/deploy.ps1</code> (+ wrapper từng service) — local hoặc remote qua SSH</td></tr>
     </table>
   </section>

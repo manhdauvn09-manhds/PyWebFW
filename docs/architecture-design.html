@@ -258,6 +258,7 @@
     <tr><td>Registry</td><td><code>JobRegistry</code>, danh sách controller ở bootstrap</td><td>Điểm mở rộng (Open/Closed)</td></tr>
     <tr><td>Chain of Responsibility</td><td>Middleware stack</td><td>Cross-cutting concerns cho HTTP</td></tr>
     <tr><td>Mixin</td><td><code>AuditMixin</code></td><td>Composition: chỉ service ghi dữ liệu mới mang audit</td></tr>
+    <tr><td>Observer</td><td><code>EventBus</code> — contact.submitted → mail · content.slug_changed → 301 · job.failed → email cảnh báo</td><td>Side-effect tách khỏi nghiệp vụ; handler cách ly lỗi; wiring duy nhất ở bootstrap</td></tr>
   </table>
 </section>
 
@@ -277,6 +278,11 @@
     <li>Rate limit API theo IP; security headers (X-Frame-Options DENY, nosniff, Referrer-Policy).</li>
     <li>Trang admin <code>noindex, nofollow</code>; container chạy non-root user.</li>
     <li>Tách module: server public không tồn tại route admin (404 tuyệt đối).</li>
+    <li>2FA TOTP (RFC 6238) cho tài khoản admin; bật xong login bắt buộc kèm OTP.</li>
+    <li>Contact form: honeypot drop thầm + throttle riêng theo IP; IP chỉ lưu dạng hash.</li>
+    <li>Upload: whitelist đuôi file + size cap + tên lưu random hex (path traversal bất khả thi về cấu trúc).</li>
+    <li>Export CSV trung hòa formula injection (= + - @ → prefix ') và luôn có audit.</li>
+    <li>Lỗi DB sanitize: constraint race → 409, chi tiết driver chỉ vào log server.</li>
   </ul>
 </section>
 

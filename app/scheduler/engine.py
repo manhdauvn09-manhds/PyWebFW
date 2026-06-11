@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import time
 
+from app.core.events import EventBus
 from app.core.exceptions import SchedulerError
 from app.core.logging import LoggerFactory
 from app.domain.models import AuditLog
@@ -36,10 +37,12 @@ class SchedulerEngine:
     """Async loop that fires due jobs concurrently and tracks their results."""
 
     def __init__(self, registry: JobRegistry, tick_seconds: float,
-                 audit_logs: LogRepository | None = None) -> None:
+                 audit_logs: LogRepository | None = None,
+                 events: EventBus | None = None) -> None:
         self._registry = registry
         self._tick = tick_seconds
         self._audit_logs = audit_logs
+        self._events = events
         self._logger = LoggerFactory.get("scheduler")
         self._last_run: dict[str, float] = {}
         self._last_result: dict[str, JobResult] = {}
@@ -95,8 +98,15 @@ class SchedulerEngine:
         self._record(result)
         return result
 
+    @property
+    def registry(self) -> JobRegistry:
+        return self._registry
+
     def _record(self, result: JobResult) -> None:
         self._last_result[result.job_name] = result
+        if result.status is JobStatus.FAILED and self._events is not None:
+            # Subscribers (e.g. an email alert) react in bootstrap wiring.
+            self._events.publish("job.failed", result.to_dict())
         if self._audit_logs is not None:
             level = "info" if result.status is JobStatus.SUCCESS else "error"
             try:

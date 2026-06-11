@@ -1,99 +1,56 @@
-# Architecture
+# Architecture (summary)
+
+> Full documentation with diagrams: open [docs/index.html](index.html)
+> (Architecture Design, Class Design, SRS, Guideline, User Manual).
 
 ## Style
 
-Layered + Clean Architecture flavor, dependencies always point inward:
+Layered + Clean Architecture; dependencies always point inward and stop at ABCs:
 
 ```
 HTTP (FastAPI/Starlette)
-   │
-Controllers (web pages / API) ──► Services (business rules, audit, cache)
+   │  middleware: security headers+CSP nonce → rate limit (+login throttle)
+   │              → logging → maintenance → traffic tracking
+Controllers (web pages / API) ──► Services (business rules, audit, cache, events)
                                       │
-                                  Repositories (SQL, mapping)
+                                  Repositories (parameterized SQL, mapping)
                                       │
-                                  BaseDatabaseManager (pool, transactions)
+                                  PooledDatabaseManager (SQLite | Postgres)
 Scheduler Engine ──► Jobs ──► Services / Managers (same stack, no HTTP)
+EventBus: services publish facts; bootstrap wires subscribers
+bootstrap.py = the single composition root
 ```
 
-- **Domain** (`app/domain`) knows nothing about HTTP or SQL.
-- **Repositories** depend on the `BaseDatabaseManager` ABC, not sqlite3.
-- **Services** depend on repositories + cache/security ABCs.
-- **Controllers** depend on services only.
-- **bootstrap.py** is the single composition root (all concrete wiring).
+## Key contracts (ABC → implementations)
 
-## Inheritance trees
+| Contract | Implementations |
+|---|---|
+| `BaseDatabaseManager` → `PooledDatabaseManager` | `SQLiteDatabaseManager` (default), `PostgresDatabaseManager` (`DB_DRIVER=postgres`) |
+| `BaseCacheManager` | `InMemoryCacheManager` (default), `RedisCacheManager` (`CACHE_BACKEND=redis`) |
+| `BaseAuthHandler` | `TokenAuthHandler` (revocable tokens via `token_version`, role from DB, 2FA flag) |
+| `BaseMailer` | `SmtpMailer`, `NullMailer` (default without `MAIL_HOST`) |
+| `BaseMediaStorage` | `LocalMediaStorage` |
+| `BaseSchedulerJob` + `Schedule` | 8 jobs: health ×2, cleanup, cache warmup, traffic flush, optimize, backup, idle-close |
+| `BaseRepository[T]` | User, Menu, Log, Content, DbConnection, Setting, Contact, Redirect (+ Traffic standalone) |
+| `BasePage` → Public/Admin | 10 public pages + dynamic `/{slug}` catch-all; 14 admin screens |
+| `BaseController` → `BaseApiController` | Public API + 11 admin API controllers (RBAC via `AdminApiController`) |
 
-```
-FrameworkError ─► ConfigurationError / DatabaseError / CacheError /
-                  ValidationFailedError / AuthenticationError / AuthorizationError /
-                  NotFoundError / ConflictError / RateLimitExceededError / SchedulerError
+## Deployment
 
-BaseLogger (ABC) ─► StructuredLogger
-BaseResponse (ABC) ─► ApiResponse[T]
-BaseValidator[T] (ABC) ─► UserInputValidator
-BaseDatabaseManager (ABC) ─► SQLiteDatabaseManager          (PostgresManager later)
-BaseCacheManager (ABC) ─► InMemoryCacheManager              (RedisManager later)
-BaseAuthHandler (ABC) ─► TokenAuthHandler
-AuthGuard ─► RoleGuard                                       (RBAC)
-BaseHealthChecker ─► ServerHealthChecker / DatabaseHealthChecker
+One Docker image; `APP_MODULES` (public/admin/scheduler) selects the role per
+container. Caddy profile terminates TLS (auto Let's Encrypt + HSTS). App ports
+bind 127.0.0.1 only. PowerShell deploy scripts (local/remote SSH) in `deploy/`.
 
-BaseEntity ─► User / MenuItem / AuditLog / ContentItem / DbConnectionProfile
-BaseRepository[T] (ABC) ─► UserRepository / MenuRepository / LogRepository /
-                           ContentRepository / DbConnectionRepository
-BaseService ─► AuthService / UserService / MenuService / ContentService /
-               SearchService / DashboardService / SystemService
-               (mutating services also mix in AuditMixin)
+## Security model (highlights)
 
-UiComponent (ABC) ─► CompositeComponent / SeoMeta / HeaderComponent /
-                     NavigationComponent / BreadcrumbsComponent / FooterComponent /
-                     TableComponent / FormComponent / SearchFormWidget / StatCardWidget
-BaseLayout (ABC) ─► PublicLayout / AdminLayout
-BasePage (ABC) ─► PublicPage ─► HomePage / SearchPage / SitemapPage /
-                                ContentPage ─► AboutPage / ContactPage /
-                                               IntroductionPage / PrivacyPolicyPage /
-                                               TermsPage / EditorialPolicyPage
-              ─► AdminPage ─► AdminHomePage / DashboardPage / UserManagementPage /
-                              MenuManagementPage / LogManagementPage /
-                              DbConnectionManagementPage
-              ─► AdminLoginPage
+PBKDF2-310k passwords · revocable HMAC tokens (logout/password change kill all
+sessions) · forced first-login password change · 2FA TOTP · RBAC with DB-fresh
+roles · login throttle 5/5min/IP · parameterized SQL + ORDER BY whitelists ·
+FTS5 query quoting · XSS escape by construction + per-request CSP nonce ·
+HttpOnly/SameSite=Strict/Secure cookie · honeypot + throttled contact form ·
+upload whitelist + random stored names · CSV formula-injection neutralization ·
+sanitized DB errors (constraint race → 409) · audit trail for every mutation.
 
-BaseController (ABC) ─► PublicWebController / AdminWebController
-                     ─► BaseApiController ─► PublicApiController
-                                          ─► AdminApiController ─► AdminAuthApiController /
-                                             AdminUserApiController / AdminMenuApiController /
-                                             AdminLogApiController / AdminDashboardApiController /
-                                             AdminSystemApiController
+## Testing
 
-Schedule (ABC) ─► IntervalSchedule / DailyTimeSchedule
-BaseSchedulerJob (ABC) ─► ServerHealthCheckJob / DatabaseHealthCheckJob /
-                          LogCleanupJob / CacheWarmupJob / DatabaseOptimizeJob /
-                          IdleConnectionCloserJob
-```
-
-## Design patterns
-
-| Pattern | Where | Why |
-|---|---|---|
-| Template Method | `BasePage.render`, `BaseValidator.validate`, `BaseSchedulerJob.execute`, `BaseController.build_router`, `BaseLayout.render` | fixed pipeline, customizable steps |
-| Repository | `BaseRepository[T]` + children | isolate SQL/mapping from business logic |
-| Unit of Work | `UnitOfWork` + ambient `contextvars` transaction | atomic multi-repository writes |
-| Strategy | `Schedule` (interval vs daily), `BaseCacheManager`, `BaseDatabaseManager` | swappable behavior |
-| Dependency Injection | `ServiceContainer` + constructor injection | low coupling, testability |
-| Factory | `SettingsFactory`, `LoggerFactory`, page factories in web controllers | centralized creation |
-| Composite | `UiComponent` / `CompositeComponent` | nested UI rendering |
-| Object Pool | `ConnectionPool` | bounded DB connections + idle close policy |
-| Registry | `JobRegistry`, controller list in bootstrap | extensibility |
-| Chain of Responsibility | middleware stack | cross-cutting HTTP concerns |
-| Mixin | `AuditMixin` | composition over inheritance for audit trail |
-
-## Security model
-
-- PBKDF2-HMAC-SHA256 password hashing (salted, 310k iterations), constant-time compare.
-- HMAC-signed expiring tokens; admin pages use HttpOnly + SameSite=Strict cookie
-  (CSRF mitigation), API clients use `Authorization: Bearer`.
-- RBAC via `RoleGuard`; admin endpoints require the `admin` role.
-- All SQL parameterized; ORDER BY columns whitelisted per repository.
-- All template output escaped (`esc()` / `xml_escape`) — XSS-safe by construction.
-- Identical error for wrong user/password (no enumeration); sanitized error
-  envelope (no stack traces); rate-limited API; security headers middleware;
-  admin pages `noindex, nofollow`.
+69 end-to-end tests through the real HTTP stack (`pytest -q`), GitHub Actions CI.

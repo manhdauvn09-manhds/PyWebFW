@@ -37,6 +37,9 @@ class MenuService(BaseService, AuditMixin):
     def list_menus(self, page: PageRequest) -> PageResult[MenuItem]:
         return self._menus.list_page(page)
 
+    def get(self, menu_id: int) -> MenuItem:
+        return self._menus.get_by_id(menu_id)
+
     def create(self, item: MenuItem, actor: str) -> MenuItem:
         self._menus.add(item)
         self._invalidate(actor, "menu.created", item)

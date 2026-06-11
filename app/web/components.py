@@ -162,6 +162,26 @@ class SearchFormWidget(UiComponent):
                 f'placeholder="Search..." minlength="2"><button>Search</button></form>')
 
 
+class PaginationComponent(UiComponent):
+    """Prev/Next pager via the `?page=` query parameter."""
+
+    def __init__(self, page: int, pages: int, base_path: str) -> None:
+        self._page = page
+        self._pages = pages
+        self._base = base_path
+
+    def render(self) -> str:
+        if self._pages <= 1:
+            return ""
+        parts = []
+        if self._page > 1:
+            parts.append(f'<a href="{esc(self._base)}?page={self._page - 1}">&larr; Prev</a>')
+        parts.append(f"<span>Page {self._page} / {self._pages}</span>")
+        if self._page < self._pages:
+            parts.append(f'<a href="{esc(self._base)}?page={self._page + 1}">Next &rarr;</a>')
+        return f'<nav class="pagination">{" ".join(parts)}</nav>'
+
+
 class BarChartComponent(UiComponent):
     """Server-rendered SVG bar chart — no JS, CSP-friendly."""
 

@@ -238,9 +238,15 @@
     <tr><td><code>UserService</code></td><td>CRUD user: business validation, check trùng, hash mật khẩu, UnitOfWork (user + audit nguyên tử)</td></tr>
     <tr><td><code>MenuService</code></td><td>Menu theo vùng (read-through cache TTL 300s), CRUD invalidate cache, warm_cache cho job</td></tr>
     <tr><td><code>ContentService</code></td><td>Trang CMS theo slug (cache), sitemap entries, RSS items</td></tr>
-    <tr><td><code>SearchService</code></td><td>Tìm kiếm nội dung published, chặn query &lt; 2 ký tự</td></tr>
-    <tr><td><code>DashboardService</code></td><td>Gom metrics: đếm bảng, log theo level, health DB, cache stats</td></tr>
+    <tr><td><code>SearchService</code></td><td>Tìm kiếm FTS5 (rank + prefix, fallback LIKE), chặn query &lt; 2 ký tự</td></tr>
+    <tr><td><code>DashboardService</code></td><td>Gom metrics: đếm bảng, log theo level, health DB, cache stats, traffic</td></tr>
     <tr><td><code>SystemService</code></td><td>Hồ sơ kết nối DB (mask DSN), tổng hợp <code>BaseHealthChecker</code> (server + database)</td></tr>
+    <tr><td><code>TrafficService</code></td><td>Page views + online: accumulator trong bộ nhớ (TrafficTracker), flush batch xuống DB, unique theo hash ẩn danh/ngày</td></tr>
+    <tr><td><code>SiteSettingsService</code></td><td>Key-value cấu hình runtime (whitelist KNOWN_SETTINGS, cache 30s, maintenance mode)</td></tr>
+    <tr><td><code>ContactService</code></td><td>Form liên hệ: honeypot drop thầm, throttle/IP, publish event <code>contact.submitted</code></td></tr>
+    <tr><td><code>MediaService</code></td><td>Upload: whitelist đuôi file, size cap, tên lưu trữ random hex (chặn traversal về cấu trúc)</td></tr>
+    <tr><td><code>BackupService</code></td><td>VACUUM INTO snapshot + xoay vòng — job đêm và màn Backups dùng chung</td></tr>
+    <tr><td><code>RedirectService</code></td><td>Quy tắc 301/302 cache 60s, resolve chỉ trên đường 404, auto-create khi đổi slug</td></tr>
   </table>
 </section>
 
@@ -306,7 +312,12 @@
     <tr><th>ABC / Base</th><th>Implementation hiện có</th><th>Mở rộng tương lai</th></tr>
     <tr><td><code>BaseDatabaseManager</code> → <code>PooledDatabaseManager</code></td><td><code>SQLiteDatabaseManager</code> (mặc định) · <code>PostgresDatabaseManager</code> (DB_DRIVER=postgres) — pool, transaction ambient, idle-close dùng chung</td><td>MySQLDatabaseManager</td></tr>
     <tr><td><code>BaseCacheManager</code></td><td><code>InMemoryCacheManager</code> (mặc định) · <code>RedisCacheManager</code> (CACHE_BACKEND=redis, multi-instance)</td><td>—</td></tr>
-    <tr><td><code>BaseAuthHandler</code></td><td><code>TokenAuthHandler</code> (Bearer header hoặc cookie HttpOnly)</td><td>OAuth2/OIDC handler</td></tr>
+    <tr><td><code>BaseAuthHandler</code></td><td><code>TokenAuthHandler</code> (Bearer/cookie + check token_version + cờ 2FA/must-change)</td><td>OAuth2/OIDC handler</td></tr>
+    <tr><td><code>BaseMailer</code></td><td><code>SmtpMailer</code> · <code>NullMailer</code> (mặc định khi chưa có MAIL_HOST — chỉ log)</td><td>SES/SendGrid mailer</td></tr>
+    <tr><td><code>BaseMediaStorage</code></td><td><code>LocalMediaStorage</code></td><td>S3/MinIO storage</td></tr>
+    <tr><td><code>EventBus</code></td><td>In-process Observer: subscribe/publish, handler cách ly lỗi; subscriber nối ở bootstrap (contact mail, slug→301, job-failed alert)</td><td>Message queue adapter</td></tr>
+    <tr><td><code>TotpProvider</code></td><td>RFC 6238 (SHA1/6 số/30s) thuần stdlib — 2FA cho admin</td><td>—</td></tr>
+    <tr><td><code>CsvExporter</code></td><td>Export CSV chuẩn + chống Excel formula injection</td><td>—</td></tr>
     <tr><td><code>AuthGuard</code> → <code>RoleGuard</code></td><td>Guard callable làm FastAPI dependency; RoleGuard <em>is-a</em> AuthGuard + RBAC</td><td>PermissionGuard chi tiết hơn role</td></tr>
     <tr><td><code>BaseLogger</code></td><td><code>StructuredLogger</code> (JSON line)</td><td>OTLP exporter</td></tr>
     <tr><td><code>BaseResponse</code></td><td><code>ApiResponse[T]</code> — envelope chuẩn {success, data, error, meta}</td><td>—</td></tr>
@@ -315,8 +326,25 @@
     <tr><td><code>BaseEntity</code></td><td>User, MenuItem, AuditLog, ContentItem, DbConnectionProfile</td><td>Entity mới cho domain mới</td></tr>
     <tr><td><code>FrameworkError</code></td><td>10 exception con, mỗi loại mang status_code + error_code ổn định</td><td>—</td></tr>
   </table>
-  <div class="note"><strong>Quy ước:</strong> ưu tiên <em>composition</em> (Settings, AuditMixin, UiComponent, Engine◆Registry) cho quan hệ "has-a";
+  <div class="note"><strong>Quy ước:</strong> ưu tiên <em>composition</em> (Settings, AuditMixin, UiComponent, Engine◆Registry, AdminWebDeps) cho quan hệ "has-a";
   chỉ dùng <em>inheritance</em> khi quan hệ thực sự là "is-a" và cha sở hữu pipeline chung (Template Method).</div>
+</section>
+
+<section class="card">
+  <h2>6. Các class bổ sung (Batch 1–3)</h2>
+  <p>Các sơ đồ SVG ở trên thể hiện bộ khung gốc; những class sau được bổ sung theo cùng đúng các pattern đó
+  (mỗi dòng = subclass của base tương ứng + 1 dòng đăng ký ở bootstrap):</p>
+  <table>
+    <tr><th>Base</th><th>Class bổ sung</th></tr>
+    <tr><td><code>AdminPage</code></td><td>ContentManagementPage (form editor) · ContactMessagesPage · MediaManagerPage · SessionManagerPage · BackupManagerPage · RedirectManagementPage · JobsMonitorPage · SettingsPage · AdminPasswordChangePage (Account Security + 2FA); UserManagementPage/MenuManagementPage có form editor + phân trang</td></tr>
+    <tr><td><code>PublicPage</code></td><td><code>DynamicContentPage</code> — route catch-all <code>/{slug}</code> (đăng ký cuối cùng) phục vụ content tạo từ CMS</td></tr>
+    <tr><td><code>AdminApiController</code></td><td>Contact · Media · Backup · Redirect · Settings (+ jobs/run và export CSV trong System/User/Log controllers)</td></tr>
+    <tr><td><code>BaseController</code></td><td>MediaWebController (<code>/media/{name}</code>) · DynamicContentController</td></tr>
+    <tr><td><code>BaseSchedulerJob</code></td><td>TrafficFlushJob · DatabaseBackupJob (ủy quyền BackupService)</td></tr>
+    <tr><td><code>BaseRepository[T]</code></td><td>SettingRepository · ContactRepository · RedirectRepository (+ <code>TrafficRepository</code> standalone upsert-style)</td></tr>
+    <tr><td><code>UiComponent</code></td><td>BarChartComponent (SVG server-side) · PaginationComponent</td></tr>
+    <tr><td><code>BaseEntity</code></td><td>SettingEntry · ContactMessage · Redirect; User thêm token_version / must_change_password / totp_*</td></tr>
+  </table>
 </section>
 
 </main>

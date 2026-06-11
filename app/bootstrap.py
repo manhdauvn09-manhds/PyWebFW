@@ -157,8 +157,20 @@ class ApplicationBuilder:
             c.resolve(RedirectService).auto_create(
                 event.payload["old_path"], event.payload["new_path"], actor="system")
 
+        def alert_failed_job(event: DomainEvent) -> None:
+            if not settings.mail.admin_email:
+                return
+            payload = event.payload
+            c.resolve(BaseMailer).send(
+                settings.mail.admin_email,
+                f"[Job FAILED] {payload['job']} on {settings.name}",
+                (f"Job: {payload['job']}\nStarted: {payload['started_at']}\n"
+                 f"Attempts: {payload['attempts']}\nError: {payload['error']}"),
+            )
+
         bus.subscribe("contact.submitted", notify_admin_of_contact)
         bus.subscribe("content.slug_changed", redirect_renamed_content)
+        bus.subscribe("job.failed", alert_failed_job)
 
     # --- wiring ---------------------------------------------------------------
     def _register_infrastructure(self) -> None:
@@ -274,7 +286,8 @@ class ApplicationBuilder:
         registry.register(IdleConnectionCloserJob(
             db, self._settings.database.idle_timeout_seconds))
         return SchedulerEngine(registry, self._settings.scheduler.tick_seconds,
-                               audit_logs=c.resolve(LogRepository))
+                               audit_logs=c.resolve(LogRepository),
+                               events=c.resolve(EventBus))
 
     def _lifespan(self, engine: SchedulerEngine | None):
         container = self._container

@@ -36,6 +36,9 @@ padding:1rem;margin:.5rem;min-width:140px;text-align:center}
 .search-form input{padding:.4rem;width:260px}
 .hp-field{position:absolute;left:-9999px;top:-9999px}
 .hidden{display:none}
+.app-form select{display:block;width:292px;padding:.35rem}
+.pagination{margin:1rem 0;display:flex;gap:1rem;align-items:center}
+.pagination a{text-decoration:none;color:#2563eb;font-weight:600}
 .admin-badge{background:#b91c1c;color:#fff;padding:.1rem .5rem;border-radius:4px;font-size:.75rem}
 """
 
