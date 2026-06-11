@@ -61,6 +61,17 @@ _TABLES: dict[str, str] = {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )""",
+    "redirects": """
+        CREATE TABLE IF NOT EXISTS redirects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_path TEXT NOT NULL UNIQUE,
+            to_path TEXT NOT NULL,
+            status_code INTEGER NOT NULL DEFAULT 301,
+            hits INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
     "contact_messages": """
         CREATE TABLE IF NOT EXISTS contact_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,6 +135,8 @@ _INDEXES = [
 _MIGRATION_COLUMNS = [
     ("users", "token_version", "INTEGER NOT NULL DEFAULT 0"),
     ("users", "must_change_password", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "totp_secret", "TEXT NOT NULL DEFAULT ''"),
+    ("users", "totp_enabled", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 # SQLite FTS5 full-text index over contents, kept in sync by triggers.
@@ -163,8 +176,8 @@ _SEED_ADMIN_MENU = [
     ("Contents", "/admin/contents"), ("Messages", "/admin/messages"),
     ("Media", "/admin/media"), ("Jobs", "/admin/jobs"),
     ("Settings", "/admin/settings"), ("Sessions", "/admin/sessions"),
-    ("Backups", "/admin/backups"), ("Logs", "/admin/logs"),
-    ("DB Connections", "/admin/db-connections"),
+    ("Redirects", "/admin/redirects"), ("Backups", "/admin/backups"),
+    ("Logs", "/admin/logs"), ("DB Connections", "/admin/db-connections"),
 ]
 
 

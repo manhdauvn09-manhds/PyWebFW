@@ -2,6 +2,7 @@
 (CRUD with audit trail and cache invalidation)."""
 from __future__ import annotations
 
+from app.core.events import EventBus
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.pagination import PageRequest, PageResult
 from app.domain.models import ContentItem
@@ -15,11 +16,12 @@ _CACHE_PREFIX = "content:"
 
 class ContentService(BaseService, AuditMixin):
     def __init__(self, contents: ContentRepository, cache: BaseCacheManager,
-                 logs: LogRepository) -> None:
+                 logs: LogRepository, events: EventBus) -> None:
         super().__init__()
         self._contents = contents
         self._cache = cache
         self._audit_repo = logs
+        self._events = events
 
     # --- public read path -----------------------------------------------------
     def get_page(self, slug: str) -> ContentItem:
@@ -68,6 +70,11 @@ class ContentService(BaseService, AuditMixin):
         self._invalidate(existing.slug)   # old slug may have changed
         self._invalidate(item.slug)
         self._audit(actor, "content.updated", target=item.slug)
+        if existing.slug != item.slug:
+            # A subscriber turns this into a 301 redirect (SEO-safe rename).
+            self._events.publish("content.slug_changed", {
+                "old_path": f"/{existing.slug}", "new_path": f"/{item.slug}",
+            })
         return item
 
     def delete(self, content_id: int, actor: str) -> None:

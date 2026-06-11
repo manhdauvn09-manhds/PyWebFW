@@ -29,6 +29,7 @@ class CurrentUser:
     id: int
     role: str
     must_change_password: bool = False
+    totp_enabled: bool = False
 
     def has_role(self, *roles: str) -> bool:
         return self.role in roles
@@ -56,7 +57,8 @@ class TokenAuthHandler(BaseAuthHandler):
             raise AuthenticationError("Token revoked")
         # Role comes from the DB, not the token: role changes apply instantly.
         return CurrentUser(id=user.id, role=user.role.value,
-                           must_change_password=user.must_change_password)
+                           must_change_password=user.must_change_password,
+                           totp_enabled=user.totp_enabled)
 
     @staticmethod
     def _extract_token(request: Request) -> str | None:

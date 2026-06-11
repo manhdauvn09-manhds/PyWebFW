@@ -18,6 +18,7 @@ from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
 from app.services.media_service import MediaService
 from app.services.menu_service import MenuService
+from app.services.redirect_service import RedirectService
 from app.services.site_settings_service import KNOWN_SETTINGS, SiteSettingsService
 from app.services.system_service import SystemService
 from app.services.user_service import UserService
@@ -41,6 +42,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   const body = JSON.stringify({
     username: form.username.value,
     password: form.password.value,
+    otp: form.otp.value || null,
   });
   const res = await fetch('/api/admin/auth/login', {
     method: 'POST',
@@ -51,6 +53,10 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   if (payload.success) {
     window.location = payload.data.user.must_change_password
       ? '/admin/change-password' : '/admin';
+  }
+  else if (payload.error?.details?.reason === 'otp_required') {
+    document.getElementById('otp-row').classList.remove('hidden');
+    message.textContent = 'Enter the code from your authenticator app.';
   }
   else { message.textContent = payload.error?.message || 'Login failed'; }
 });
@@ -105,25 +111,95 @@ class AdminLoginPage(BasePage):
             '<form id="login-form" class="app-form">'
             '<label>Username<input name="username" required></label>'
             '<label>Password<input name="password" type="password" required></label>'
+            '<div id="otp-row" class="hidden"><label>One-time code'
+            '<input name="otp" inputmode="numeric" autocomplete="one-time-code"'
+            ' maxlength="10"></label></div>'
             "<button type=\"submit\">Sign in</button>"
             '<div class="form-message" role="alert"></div></form>'
             f"{script}"
         )
 
 
+_TOTP_SCRIPT = """
+<script nonce="__NONCE__">
+const tfa = document.getElementById('tfa');
+const tfaMessage = tfa.querySelector('.form-message');
+const post = async (url, body) => {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+    body: body ? JSON.stringify(body) : null,
+  });
+  return res.json();
+};
+const setupBtn = document.getElementById('tfa-setup');
+if (setupBtn) setupBtn.addEventListener('click', async () => {
+  const result = await post('/api/admin/auth/2fa/setup');
+  if (!result.success) { tfaMessage.textContent = result.error?.message; return; }
+  document.getElementById('tfa-secret').textContent = result.data.secret;
+  document.getElementById('tfa-uri').textContent = result.data.otpauth_uri;
+  document.getElementById('tfa-confirm').classList.remove('hidden');
+});
+const enableBtn = document.getElementById('tfa-enable');
+if (enableBtn) enableBtn.addEventListener('click', async () => {
+  const result = await post('/api/admin/auth/2fa/enable',
+    {otp: document.getElementById('tfa-otp').value});
+  if (result.success) { window.location.reload(); }
+  else { tfaMessage.textContent = result.error?.message || 'Invalid code'; }
+});
+const disableBtn = document.getElementById('tfa-disable');
+if (disableBtn) disableBtn.addEventListener('click', async () => {
+  const result = await post('/api/admin/auth/2fa/disable',
+    {otp: document.getElementById('tfa-otp-off').value});
+  if (result.success) { window.location.reload(); }
+  else { tfaMessage.textContent = result.error?.message || 'Invalid code'; }
+});
+</script>
+"""
+
+
 class AdminPasswordChangePage(AdminPage):
-    """Forced/normal password change. While `must_change_password` is set,
-    every other admin screen and API redirects/blocks until this succeeds."""
+    """Account security screen: password change + two-factor authentication.
+    While `must_change_password` is set, every other admin screen and API
+    redirects/blocks until the password is changed here."""
 
     @property
     def title(self) -> str:
-        return "Change Password"
+        return "Account Security"
+
+    def _totp_section(self) -> str:
+        enabled = bool(self._ctx.user and self._ctx.user.totp_enabled)
+        if enabled:
+            body = (
+                "<p>Status: <strong>enabled</strong> ✅</p>"
+                '<label>One-time code<input id="tfa-otp-off" inputmode="numeric"'
+                ' maxlength="10"></label>'
+                '<button type="button" id="tfa-disable">Disable 2FA</button>'
+            )
+        else:
+            body = (
+                "<p>Status: <strong>disabled</strong> — protect this account with "
+                "an authenticator app (Google Authenticator, Authy, 1Password...).</p>"
+                '<button type="button" id="tfa-setup">Set up 2FA</button>'
+                '<div id="tfa-confirm" class="hidden">'
+                "<p>1. Add this secret to your authenticator app:</p>"
+                '<p><code id="tfa-secret"></code></p>'
+                '<p><small>URI: <code id="tfa-uri"></code></small></p>'
+                "<p>2. Enter the generated code to confirm:</p>"
+                '<label>One-time code<input id="tfa-otp" inputmode="numeric"'
+                ' maxlength="10"></label>'
+                '<button type="button" id="tfa-enable">Enable 2FA</button></div>'
+            )
+        return (f'<div id="tfa" class="app-form"><h2>Two-factor authentication</h2>'
+                f'{body}<div class="form-message" role="alert"></div></div>')
 
     def build_content(self) -> str:
-        script = _CHANGE_PASSWORD_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
+        nonce = esc(self._ctx.csp_nonce)
+        pw_script = _CHANGE_PASSWORD_SCRIPT.replace("__NONCE__", nonce)
+        totp_script = _TOTP_SCRIPT.replace("__NONCE__", nonce)
         return (
-            "<h1>Change your password</h1>"
-            "<p>You must set a new password before continuing.</p>"
+            "<h1>Account security</h1>"
+            "<h2>Change password</h2>"
             '<form id="pw-form" class="app-form">'
             '<label>Current password<input name="current_password" type="password" required></label>'
             '<label>New password (min 8 chars)<input name="new_password" type="password"'
@@ -132,7 +208,7 @@ class AdminPasswordChangePage(AdminPage):
             ' minlength="8" required></label>'
             '<button type="submit">Update password</button>'
             '<div class="form-message" role="alert"></div></form>'
-            f"{script}"
+            f"{pw_script}{self._totp_section()}{totp_script}"
         )
 
 
@@ -206,7 +282,9 @@ class UserManagementPage(AdminPage):
             [(u.id, u.username, u.email, u.role.value,
               "yes" if u.is_active else "no", u.created_at) for u in result.items],
         )
-        return (f"<h1>Users ({result.total})</h1>{table.render()}"
+        return (f"<h1>Users ({result.total})</h1>"
+                '<p><a href="/api/admin/users/export">Export CSV</a></p>'
+                f"{table.render()}"
                 "<p>Create/update/delete via <code>/api/admin/users</code>.</p>")
 
 
@@ -245,7 +323,9 @@ class LogManagementPage(AdminPage):
             [(l.created_at, l.actor, l.action, l.target, l.detail, l.level)
              for l in result.items],
         )
-        return f"<h1>Audit / Action Logs ({result.total})</h1>{table.render()}"
+        return (f"<h1>Audit / Action Logs ({result.total})</h1>"
+                '<p><a href="/api/admin/logs/export">Export CSV</a></p>'
+                f"{table.render()}")
 
 
 _CONTENT_FORM_SCRIPT = """
@@ -505,6 +585,7 @@ class ContactMessagesPage(AdminPage):
             for m in result.items
         ) or '<tr><td colspan="7">No messages</td></tr>'
         return (f"<h1>Messages ({result.total} — {self._contact.unread_count()} unread)</h1>"
+                '<p><a href="/api/admin/messages/export">Export CSV</a></p>'
                 '<table class="data-table"><thead><tr><th>Date</th><th>Name</th>'
                 "<th>Email</th><th>Subject</th><th>Message</th><th>Status</th><th></th>"
                 f"</tr></thead><tbody>{rows}</tbody></table>"
@@ -633,6 +714,68 @@ class BackupManagerPage(AdminPage):
                 "<th>Created</th><th></th></tr></thead>"
                 f"<tbody>{rows}</tbody></table>"
                 f"{_action_script(self._ctx.csp_nonce)}")
+
+
+_REDIRECT_FORM_SCRIPT = """
+<script nonce="__NONCE__">
+const rForm = document.getElementById('redirect-form');
+rForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = rForm.querySelector('.form-message');
+  const res = await fetch('/api/admin/redirects', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+    body: JSON.stringify({
+      from_path: rForm.elements['from_path'].value,
+      to_path: rForm.elements['to_path'].value,
+      status_code: parseInt(rForm.elements['status_code'].value, 10),
+    }),
+  });
+  const result = await res.json();
+  if (result.success) { window.location.reload(); }
+  else { message.textContent = result.error?.message || 'Save failed'; }
+});
+</script>
+"""
+
+
+class RedirectManagementPage(AdminPage):
+    """301/302 rules — slug renames create them automatically (event bus)."""
+
+    def __init__(self, ctx: PageContext, redirects: "RedirectService") -> None:
+        super().__init__(ctx)
+        self._redirects = redirects
+
+    @property
+    def title(self) -> str:
+        return "Redirects"
+
+    def build_content(self) -> str:
+        result = self._redirects.list_redirects(PageRequest.create(size=100))
+        rows = "".join(
+            f"<tr><td>{esc(r.from_path)}</td><td>{esc(r.to_path)}</td>"
+            f"<td>{esc(r.status_code)}</td><td>{esc(r.hits)}</td>"
+            f"<td>{'yes' if r.is_active else 'no'}</td>"
+            f'<td><button data-action="/api/admin/redirects/{esc(r.id)}"'
+            f' data-method="DELETE" data-confirm="Delete this redirect?">Delete</button>'
+            f"</td></tr>"
+            for r in result.items
+        ) or '<tr><td colspan="6">No redirects</td></tr>'
+        nonce = esc(self._ctx.csp_nonce)
+        form_script = _REDIRECT_FORM_SCRIPT.replace("__NONCE__", nonce)
+        return (f"<h1>Redirects ({result.total})</h1>"
+                "<p>Renaming a content slug creates a 301 automatically.</p>"
+                '<form id="redirect-form" class="app-form">'
+                '<label>From path<input name="from_path" required placeholder="/old-page"></label>'
+                '<label>To path<input name="to_path" required placeholder="/new-page"></label>'
+                '<label>Status<input name="status_code" value="301" required'
+                ' pattern="30[12]"></label>'
+                '<button type="submit">Add redirect</button>'
+                '<div class="form-message" role="alert"></div></form>'
+                '<table class="data-table"><thead><tr><th>From</th><th>To</th>'
+                "<th>Code</th><th>Hits</th><th>Active</th><th></th></tr></thead>"
+                f"<tbody>{rows}</tbody></table>"
+                f"{form_script}{_action_script(self._ctx.csp_nonce)}")
 
 
 class DbConnectionManagementPage(AdminPage):

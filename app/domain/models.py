@@ -48,6 +48,8 @@ class User(BaseEntity):
     is_active: bool = True
     token_version: int = 0            # bumped on logout/password change -> revokes tokens
     must_change_password: bool = False
+    totp_secret: str = ""
+    totp_enabled: bool = False
 
     def revoke_tokens(self) -> None:
         self.token_version += 1
@@ -57,6 +59,7 @@ class User(BaseEntity):
         data = self.to_dict()
         data.pop("password_hash", None)
         data.pop("token_version", None)
+        data.pop("totp_secret", None)
         data["role"] = self.role.value
         return data
 
@@ -98,6 +101,17 @@ class ContentItem(BaseEntity):
     seo_title: str = ""
     seo_description: str = ""
     is_published: bool = True
+
+
+@dataclass(slots=True)
+class Redirect(BaseEntity):
+    """A 301/302 redirect rule, e.g. created automatically on slug changes."""
+
+    from_path: str = ""
+    to_path: str = ""
+    status_code: int = 301
+    hits: int = 0
+    is_active: bool = True
 
 
 @dataclass(slots=True)

@@ -6,11 +6,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.core.events import EventBus
 from app.core.exceptions import RateLimitExceededError
 from app.core.pagination import PageRequest, PageResult
 from app.core.security import SlidingWindowRateLimiter
 from app.domain.models import ContactMessage
-from app.infrastructure.mail.mailer import BaseMailer
 from app.repositories.contact_repository import ContactRepository
 from app.repositories.log_repository import LogRepository
 from app.services.base import AuditMixin, BaseService
@@ -27,13 +27,12 @@ class ContactInput:
 
 class ContactService(BaseService, AuditMixin):
     def __init__(self, messages: ContactRepository, logs: LogRepository,
-                 mailer: BaseMailer, admin_email: str = "",
+                 events: EventBus,
                  max_per_window: int = 3, window_seconds: int = 600) -> None:
         super().__init__()
         self._messages = messages
         self._audit_repo = logs
-        self._mailer = mailer
-        self._admin_email = admin_email
+        self._events = events
         self._limiter = SlidingWindowRateLimiter(max_per_window, window_seconds)
 
     def submit(self, data: ContactInput, ip_hash: str) -> ContactMessage | None:
@@ -53,18 +52,16 @@ class ContactService(BaseService, AuditMixin):
         )
         self._messages.add(entry)
         self._audit("anonymous", "contact.submitted", target=entry.email)
-        self._notify_admin(entry)
+        # Decoupled side effects (mail notify, ...) — handlers subscribe in bootstrap.
+        self._events.publish("contact.submitted", {
+            "name": entry.name, "email": entry.email,
+            "subject": entry.subject, "message": entry.message,
+        })
         return entry
 
-    def _notify_admin(self, entry: ContactMessage) -> None:
-        if not self._admin_email:
-            return
-        # Best-effort: a mail failure must never fail the submission.
-        self._mailer.send(
-            self._admin_email,
-            f"[Contact] {entry.subject or 'New message'} — {entry.name}",
-            f"From: {entry.name} <{entry.email}>\n\n{entry.message}",
-        )
+    def export_all(self, actor: str) -> list[dict]:
+        self._audit(actor, "contact.exported")
+        return [m.to_dict() for m in self._messages.list_all()]
 
     # --- admin management -------------------------------------------------------
     def list_messages(self, page: PageRequest,

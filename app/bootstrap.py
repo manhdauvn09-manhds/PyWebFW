@@ -20,6 +20,7 @@ from app.api.admin_api import (
     AdminAuthApiController,
     AdminBackupApiController,
     AdminContactApiController,
+    AdminRedirectApiController,
     AdminContentApiController,
     AdminDashboardApiController,
     AdminLogApiController,
@@ -38,7 +39,8 @@ from app.config.settings import (
     get_settings,
 )
 from app.core.container import ServiceContainer
-from app.core.exceptions import AuthenticationError, FrameworkError
+from app.core.events import DomainEvent, EventBus
+from app.core.exceptions import AuthenticationError, FrameworkError, NotFoundError
 from app.core.logging import LoggerFactory
 from app.core.middleware import (
     MaintenanceMiddleware,
@@ -49,7 +51,12 @@ from app.core.middleware import (
 )
 from app.core.responses import ApiResponse
 from app.core.routing import BaseController
-from app.core.security import PasswordHasher, SlidingWindowRateLimiter, TokenManager
+from app.core.security import (
+    PasswordHasher,
+    SlidingWindowRateLimiter,
+    TokenManager,
+    TotpProvider,
+)
 from app.infrastructure.auth.manager import BaseAuthHandler, TokenAuthHandler
 from app.infrastructure.cache.manager import BaseCacheManager, InMemoryCacheManager
 from app.infrastructure.database.manager import BaseDatabaseManager, SQLiteDatabaseManager
@@ -61,6 +68,7 @@ from app.repositories.content_repository import ContentRepository
 from app.repositories.db_connection_repository import DbConnectionRepository
 from app.repositories.log_repository import LogRepository
 from app.repositories.menu_repository import MenuRepository
+from app.repositories.redirect_repository import RedirectRepository
 from app.repositories.setting_repository import SettingRepository
 from app.repositories.traffic_repository import TrafficRepository
 from app.repositories.user_repository import UserRepository
@@ -82,6 +90,7 @@ from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
 from app.services.media_service import MediaService
 from app.services.menu_service import MenuService
+from app.services.redirect_service import RedirectService
 from app.services.search_service import SearchService
 from app.services.site_settings_service import SiteSettingsService
 from app.services.system_service import (
@@ -94,6 +103,7 @@ from app.services.user_service import UserService
 from app.web.controllers import (
     AdminWebController,
     AdminWebDeps,
+    DynamicContentController,
     MediaWebController,
     PublicWebController,
 )
@@ -111,6 +121,7 @@ class ApplicationBuilder:
         self._register_infrastructure()
         self._register_repositories()
         self._register_services()
+        self._register_event_handlers()
         self._initialize_schema()
         engine = self._build_scheduler()
 
@@ -120,9 +131,34 @@ class ApplicationBuilder:
         app.state.scheduler_engine = engine
         self._register_middleware(app)
         self._register_error_handlers(app)
-        self._register_controllers(app, engine)
+        # /healthz must be routed before the public catch-all /{slug}.
         self._register_health_endpoint(app, engine)
+        self._register_controllers(app, engine)
         return app
+
+    def _register_event_handlers(self) -> None:
+        """Domain-event subscribers — the only place that knows which side
+        effects follow which facts."""
+        c = self._container
+        bus = c.resolve(EventBus)
+        settings = self._settings
+
+        def notify_admin_of_contact(event: DomainEvent) -> None:
+            if not settings.mail.admin_email:
+                return
+            payload = event.payload
+            c.resolve(BaseMailer).send(
+                settings.mail.admin_email,
+                f"[Contact] {payload['subject'] or 'New message'} — {payload['name']}",
+                f"From: {payload['name']} <{payload['email']}>\n\n{payload['message']}",
+            )
+
+        def redirect_renamed_content(event: DomainEvent) -> None:
+            c.resolve(RedirectService).auto_create(
+                event.payload["old_path"], event.payload["new_path"], actor="system")
+
+        bus.subscribe("contact.submitted", notify_admin_of_contact)
+        bus.subscribe("content.slug_changed", redirect_renamed_content)
 
     # --- wiring ---------------------------------------------------------------
     def _register_infrastructure(self) -> None:
@@ -134,6 +170,8 @@ class ApplicationBuilder:
         c.register_instance(PasswordHasher, PasswordHasher(settings.security.password_iterations))
         c.register_instance(TokenManager, TokenManager(
             settings.security.secret_key, settings.security.token_ttl_seconds))
+        c.register_instance(TotpProvider, TotpProvider(issuer=settings.name))
+        c.register_instance(EventBus, EventBus())
         c.register_singleton(BaseAuthHandler, lambda c: TokenAuthHandler(
             c.resolve(TokenManager), c.resolve(UserRepository)))
         c.register_singleton(BaseMailer, lambda c: (
@@ -160,7 +198,7 @@ class ApplicationBuilder:
         for repo_type in (UserRepository, MenuRepository, LogRepository,
                           ContentRepository, DbConnectionRepository,
                           SettingRepository, TrafficRepository,
-                          ContactRepository):
+                          ContactRepository, RedirectRepository):
             c.register_singleton(
                 repo_type,
                 lambda c, rt=repo_type: rt(c.resolve(BaseDatabaseManager)))
@@ -169,7 +207,8 @@ class ApplicationBuilder:
         c = self._container
         c.register_singleton(AuthService, lambda c: AuthService(
             c.resolve(UserRepository), c.resolve(LogRepository),
-            c.resolve(PasswordHasher), c.resolve(TokenManager)))
+            c.resolve(PasswordHasher), c.resolve(TokenManager),
+            c.resolve(TotpProvider)))
         c.register_singleton(UserService, lambda c: UserService(
             c.resolve(BaseDatabaseManager), c.resolve(UserRepository),
             c.resolve(LogRepository), c.resolve(PasswordHasher)))
@@ -177,6 +216,9 @@ class ApplicationBuilder:
             c.resolve(MenuRepository), c.resolve(LogRepository), c.resolve(BaseCacheManager)))
         c.register_singleton(ContentService, lambda c: ContentService(
             c.resolve(ContentRepository), c.resolve(BaseCacheManager),
+            c.resolve(LogRepository), c.resolve(EventBus)))
+        c.register_singleton(RedirectService, lambda c: RedirectService(
+            c.resolve(RedirectRepository), c.resolve(BaseCacheManager),
             c.resolve(LogRepository)))
         c.register_singleton(SearchService, lambda c: SearchService(
             c.resolve(ContentRepository)))
@@ -184,7 +226,7 @@ class ApplicationBuilder:
             c.resolve(TrafficRepository)))
         c.register_singleton(ContactService, lambda c: ContactService(
             c.resolve(ContactRepository), c.resolve(LogRepository),
-            c.resolve(BaseMailer), admin_email=self._settings.mail.admin_email))
+            c.resolve(EventBus)))
         c.register_singleton(MediaService, lambda c: MediaService(
             c.resolve(BaseMediaStorage), c.resolve(LogRepository),
             max_upload_mb=self._settings.media.max_upload_mb))
@@ -264,13 +306,23 @@ class ApplicationBuilder:
         app.add_middleware(RateLimitMiddleware, limiter=limiter, login_limiter=login_limiter)
         app.add_middleware(SecurityHeadersMiddleware)
 
-    @staticmethod
-    def _register_error_handlers(app: FastAPI) -> None:
+    def _register_error_handlers(self, app: FastAPI) -> None:
+        redirects = self._container.resolve(RedirectService)
+
         def _nonce(request: Request) -> str:
             return getattr(request.state, "csp_nonce", "")
 
         def _is_api(request: Request) -> bool:
             return request.url.path.startswith("/api/")
+
+        def _maybe_redirect(request: Request) -> RedirectResponse | None:
+            """Before showing a web 404, check the redirect rules (lookups
+            only happen on the 404 path — zero cost for normal requests)."""
+            match = redirects.resolve(request.url.path)
+            if match is None:
+                return None
+            to_path, status_code = match
+            return RedirectResponse(to_path, status_code=status_code)
 
         async def framework_error_handler(request: Request, exc: FrameworkError):
             if _is_api(request):
@@ -280,6 +332,10 @@ class ApplicationBuilder:
                 )
             if isinstance(exc, AuthenticationError) and request.url.path.startswith("/admin"):
                 return RedirectResponse("/admin/login", status_code=303)
+            if isinstance(exc, NotFoundError):
+                redirect = _maybe_redirect(request)
+                if redirect is not None:
+                    return redirect
             return HTMLResponse(
                 render_error_page(exc.status_code, exc.message, nonce=_nonce(request)),
                 status_code=exc.status_code,
@@ -293,6 +349,10 @@ class ApplicationBuilder:
                     status_code=exc.status_code,
                     content=ApiResponse.fail("HTTP_ERROR", str(exc.detail)).to_dict(),
                 )
+            if exc.status_code == 404:
+                redirect = _maybe_redirect(request)
+                if redirect is not None:
+                    return redirect
             return HTMLResponse(
                 render_error_page(exc.status_code, nonce=_nonce(request)),
                 status_code=exc.status_code,
@@ -342,6 +402,7 @@ class ApplicationBuilder:
                 contact=c.resolve(ContactService),
                 media=c.resolve(MediaService),
                 backups=c.resolve(BackupService),
+                redirects=c.resolve(RedirectService),
                 engine=engine,
             )
             controllers += [
@@ -354,6 +415,8 @@ class ApplicationBuilder:
                                           c.resolve(ContentService)),
                 AdminContactApiController(auth_handler, auth_service,
                                           c.resolve(ContactService)),
+                AdminRedirectApiController(auth_handler, auth_service,
+                                           c.resolve(RedirectService)),
                 AdminMediaApiController(auth_handler, auth_service,
                                         c.resolve(MediaService)),
                 AdminBackupApiController(auth_handler, auth_service,
@@ -371,6 +434,11 @@ class ApplicationBuilder:
         # on the public site, previews in the admin area).
         if settings.has_module(MODULE_PUBLIC) or settings.has_module(MODULE_ADMIN):
             controllers.append(MediaWebController(c.resolve(MediaService)))
+
+        # The /{slug} catch-all MUST be the very last route registered.
+        if settings.has_module(MODULE_PUBLIC):
+            controllers.append(DynamicContentController(
+                settings, c.resolve(MenuService), c.resolve(ContentService)))
 
         for controller in controllers:
             app.include_router(controller.build_router())

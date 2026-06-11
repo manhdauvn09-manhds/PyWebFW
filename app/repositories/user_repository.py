@@ -25,6 +25,8 @@ class UserRepository(BaseRepository[User]):
             is_active=bool(row["is_active"]),
             token_version=row["token_version"],
             must_change_password=bool(row["must_change_password"]),
+            totp_secret=row["totp_secret"],
+            totp_enabled=bool(row["totp_enabled"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -38,6 +40,8 @@ class UserRepository(BaseRepository[User]):
             "is_active": int(entity.is_active),
             "token_version": entity.token_version,
             "must_change_password": int(entity.must_change_password),
+            "totp_secret": entity.totp_secret,
+            "totp_enabled": int(entity.totp_enabled),
             "created_at": entity.created_at,
             "updated_at": entity.updated_at,
         }

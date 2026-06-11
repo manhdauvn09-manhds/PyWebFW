@@ -56,6 +56,11 @@ class UserService(BaseService, AuditMixin):
     def list_users(self, page: PageRequest) -> PageResult[User]:
         return self._users.list_page(page)
 
+    def export_all(self, actor: str) -> list[dict]:
+        """Export is a sensitive bulk read — always audited."""
+        self._audit(actor, "users.exported")
+        return [u.to_public_dict() for u in self._users.list_all()]
+
     def get(self, user_id: int) -> User:
         return self._users.get_by_id(user_id)
 

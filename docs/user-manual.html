@@ -174,6 +174,8 @@ copy .env.example .env        &lt;# sửa SECURITY_SECRET_KEY #&gt;
     <tr><td>Media</td><td><code>/admin/media</code></td><td>Upload &amp; quản lý file (jpg/png/gif/webp/pdf, giới hạn dung lượng); file phục vụ tại <code>/media/&lt;tên&gt;</code> với tên ngẫu nhiên</td></tr>
     <tr><td>Sessions</td><td><code>/admin/sessions</code></td><td>Phiên đăng nhập: lần login cuối mỗi user + nút thu hồi toàn bộ token của user đó</td></tr>
     <tr><td>Backups</td><td><code>/admin/backups</code></td><td>Danh sách backup DB, tạo thủ công, tải về, xóa (tự động hằng đêm 02:30, giữ 7 bản)</td></tr>
+    <tr><td>Redirects</td><td><code>/admin/redirects</code></td><td>Quy tắc 301/302 + đếm hit; đổi slug content tự sinh 301 (qua event bus)</td></tr>
+    <tr><td>Account Security</td><td><code>/admin/change-password</code></td><td>Đổi mật khẩu + bật/tắt <strong>2FA TOTP</strong> (Google Authenticator/Authy) — bật xong login yêu cầu thêm mã OTP</td></tr>
     <tr><td>Jobs</td><td><code>/admin/jobs</code></td><td>Giám sát scheduler: lịch chạy, kết quả gần nhất (status/duration/attempts), nút "Run now" cho từng job</td></tr>
     <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Cấu hình runtime (tagline, footer, SEO mặc định, <strong>maintenance mode</strong>) — áp dụng ngay không cần deploy</td></tr>
     <tr><td>Logs</td><td><code>/admin/logs</code></td><td>Audit trail: ai làm gì, lúc nào, mức độ (info/warning/error)</td></tr>
@@ -199,6 +201,9 @@ Content-Type: application/json
     <tr><td>GET/POST · DELETE</td><td><code>/api/admin/media[/{name}]</code></td><td>Upload multipart field <code>file</code>; whitelist đuôi file + giới hạn size</td></tr>
     <tr><td>GET/POST · GET/DELETE</td><td><code>/api/admin/backups</code> · <code>/{name}/download</code></td><td>Backup thủ công + tải về (tên file validate chặt)</td></tr>
     <tr><td>POST</td><td><code>/api/admin/users/{id}/revoke-sessions</code></td><td>Thu hồi mọi token của user (đăng xuất mọi thiết bị)</td></tr>
+    <tr><td>POST</td><td><code>/api/admin/auth/2fa/setup</code> · <code>/enable</code> · <code>/disable</code></td><td>2FA TOTP; login gửi thêm field <code>otp</code> khi đã bật (thiếu → 401 reason <code>otp_required</code>)</td></tr>
+    <tr><td>GET/POST · DELETE</td><td><code>/api/admin/redirects[/{id}]</code></td><td>Quy tắc redirect 301/302</td></tr>
+    <tr><td>GET</td><td><code>/api/admin/users/export</code> · <code>/logs/export</code> · <code>/messages/export</code></td><td>Export CSV (chống formula injection, có audit)</td></tr>
     <tr><td>POST</td><td><code>/api/admin/auth/change-password</code></td><td>Body: current_password, new_password (≥8 ký tự) — trả token mới, token cũ bị thu hồi</td></tr>
     <tr><td>GET/POST</td><td><code>/api/admin/users</code></td><td>Paging: <code>?page=&amp;size=&amp;sort_by=&amp;sort_desc=</code></td></tr>
     <tr><td>GET/PUT/DELETE</td><td><code>/api/admin/users/{id}</code></td><td>PUT bỏ trống password = giữ nguyên</td></tr>

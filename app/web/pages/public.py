@@ -70,6 +70,15 @@ class ContentPage(PublicPage):
                 f"<div>{esc(self._item.body)}</div></article>")
 
 
+class DynamicContentPage(ContentPage):
+    """Serves any published content by slug (the catch-all route) — content
+    created in the admin CMS is reachable without code changes."""
+
+    def __init__(self, ctx: PageContext, contents: ContentService, slug: str) -> None:
+        self.slug = slug          # instance attr set before ContentPage loads it
+        super().__init__(ctx, contents)
+
+
 class AboutPage(ContentPage):
     slug = "about"
 

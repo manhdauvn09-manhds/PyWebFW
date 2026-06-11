@@ -68,6 +68,16 @@ class BaseRepository(ABC, Generic[T]):
         return PageResult(items=[self._map_row(r) for r in rows],
                           total=total, page=page.page, size=page.size)
 
+    def list_all(self, where: str | None = None, params: Sequence[Any] = (),
+                 limit: int = 10_000) -> list[T]:
+        """Bulk read for exports — bypasses page-size clamping, hard-capped."""
+        where_sql = f" WHERE {where}" if where else ""
+        rows = self._db.fetch_all(
+            f"SELECT * FROM {self.table_name}{where_sql} ORDER BY id LIMIT ?",
+            (*params, limit),
+        )
+        return [self._map_row(r) for r in rows]
+
     def count(self, where: str | None = None, params: Sequence[Any] = ()) -> int:
         where_sql = f" WHERE {where}" if where else ""
         row = self._db.fetch_one(f"SELECT COUNT(*) AS n FROM {self.table_name}{where_sql}", params)

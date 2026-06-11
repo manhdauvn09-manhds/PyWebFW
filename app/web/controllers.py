@@ -25,6 +25,7 @@ from app.services.content_service import ContentService
 from app.services.dashboard_service import DashboardService
 from app.services.media_service import MediaService
 from app.services.menu_service import MenuService
+from app.services.redirect_service import RedirectService
 from app.services.search_service import SearchService
 from app.services.site_settings_service import SiteSettingsService
 from app.services.system_service import SystemService
@@ -42,6 +43,7 @@ from app.web.pages.admin import (
     LogManagementPage,
     MediaManagerPage,
     MenuManagementPage,
+    RedirectManagementPage,
     SessionManagerPage,
     SettingsPage,
     UserManagementPage,
@@ -50,6 +52,7 @@ from app.web.pages.base import BasePage, PageContext
 from app.web.pages.public import (
     AboutPage,
     ContactPage,
+    DynamicContentPage,
     EditorialPolicyPage,
     HomePage,
     IntroductionPage,
@@ -151,6 +154,32 @@ class PublicWebController(BaseController):
                 f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>')
 
 
+class DynamicContentController(BaseController):
+    """Catch-all `/{slug}` page route, mounted LAST so every fixed route wins
+    first. Content created in the admin CMS is instantly reachable; unknown
+    slugs fall through to the 404/redirect pipeline."""
+
+    tags = ["public-web"]
+
+    def __init__(self, settings: AppSettings, menus: MenuService,
+                 contents: ContentService) -> None:
+        self._settings = settings
+        self._menus = menus
+        self._contents = contents
+
+    def _register(self, router: APIRouter) -> None:
+        @router.get("/{slug}", response_class=HTMLResponse, include_in_schema=False)
+        def content_page(slug: str, request: Request) -> HTMLResponse:
+            ctx = PageContext(
+                site_name=self._settings.name,
+                path=request.url.path,
+                menu_items=self._menus.get_menu(MenuArea.PUBLIC),
+                csp_nonce=getattr(request.state, "csp_nonce", ""),
+            )
+            page = DynamicContentPage(ctx, self._contents, slug)
+            return HTMLResponse(page.render())
+
+
 @dataclass(frozen=True)
 class AdminWebDeps:
     """Service bundle for the admin area — one new screen = one new field
@@ -166,6 +195,7 @@ class AdminWebDeps:
     contact: ContactService
     media: MediaService
     backups: BackupService
+    redirects: RedirectService
     engine: SchedulerEngine | None = None
 
 
@@ -233,6 +263,7 @@ class AdminWebController(BaseController):
             "/jobs": lambda ctx: JobsMonitorPage(ctx, deps.engine),
             "/settings": lambda ctx: SettingsPage(ctx, deps.site_settings),
             "/sessions": lambda ctx: SessionManagerPage(ctx, deps.users, deps.logs),
+            "/redirects": lambda ctx: RedirectManagementPage(ctx, deps.redirects),
             "/backups": lambda ctx: BackupManagerPage(ctx, deps.backups),
             "/logs": lambda ctx: LogManagementPage(ctx, deps.logs),
             "/db-connections": lambda ctx: DbConnectionManagementPage(ctx, deps.system),

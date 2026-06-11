@@ -13,11 +13,14 @@ from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFi
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr, Field
 
+from app.core.csv_export import CsvExporter
 from app.core.exceptions import ConflictError, NotFoundError, SchedulerError
 from app.core.pagination import PageRequest
 from app.core.routing import BaseApiController
+from app.domain.models import AuditLog, Redirect
 from app.scheduler.engine import SchedulerEngine
 from app.domain.models import ContentItem, DbConnectionProfile, MenuArea, MenuItem, Role
+from app.services.redirect_service import RedirectService
 from app.infrastructure.auth.manager import (
     ADMIN_TOKEN_COOKIE,
     BaseAuthHandler,
@@ -41,6 +44,18 @@ from app.services.user_service import UserInput, UserService
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=128)
+    otp: str | None = Field(None, max_length=10)   # required when 2FA enabled
+
+
+class OtpRequest(BaseModel):
+    otp: str = Field(min_length=6, max_length=10)
+
+
+class RedirectRequest(BaseModel):
+    from_path: str = Field(min_length=2, max_length=300, pattern=r"^/.*")
+    to_path: str = Field(min_length=1, max_length=300, pattern=r"^/.*")
+    status_code: int = Field(301)
+    is_active: bool = True
 
 
 class ChangePasswordRequest(BaseModel):
@@ -128,9 +143,26 @@ class AdminAuthApiController(AdminApiController):
     def _register(self, router: APIRouter) -> None:
         @router.post("/login")
         def login(payload: LoginRequest, response: Response) -> dict:
-            result = self._auth_service.login(payload.username, payload.password)
+            result = self._auth_service.login(payload.username, payload.password,
+                                              otp=payload.otp)
             self._set_session_cookie(response, result.token)
             return self.ok({"token": result.token, "user": result.user.to_public_dict()})
+
+        @router.post("/2fa/setup")
+        def setup_2fa(user: CurrentUser = Depends(self._guard)) -> dict:
+            return self.ok(self._auth_service.setup_totp(user.id))
+
+        @router.post("/2fa/enable")
+        def enable_2fa(payload: OtpRequest,
+                       user: CurrentUser = Depends(self._guard)) -> dict:
+            self._auth_service.enable_totp(user.id, payload.otp)
+            return self.ok({"totp_enabled": True})
+
+        @router.post("/2fa/disable")
+        def disable_2fa(payload: OtpRequest,
+                        user: CurrentUser = Depends(self._guard)) -> dict:
+            self._auth_service.disable_totp(user.id, payload.otp)
+            return self.ok({"totp_enabled": False})
 
         @router.post("/change-password")
         def change_password(payload: ChangePasswordRequest, response: Response,
@@ -175,6 +207,15 @@ class AdminUserApiController(AdminApiController):
         ) -> dict:
             result = self._users.list_users(PageRequest.create(page, size, sort_by, sort_desc))
             return self.paginated(result, lambda u: u.to_public_dict())
+
+        # NOTE: registered before /{user_id} so "export" is not parsed as an id.
+        @router.get("/export")
+        def export_users(user: CurrentUser = Depends(self._guard)) -> Response:
+            rows = self._users.export_all(actor=self._actor_name(user))
+            return CsvExporter.response(
+                "users.csv", rows,
+                ["id", "username", "email", "role", "is_active",
+                 "totp_enabled", "created_at"])
 
         @router.get("/{user_id}")
         def get_user(user_id: int, user: CurrentUser = Depends(self._guard)) -> dict:
@@ -301,6 +342,13 @@ class AdminContactApiController(AdminApiController):
                                                  unread_only=unread_only)
             return self.paginated(result, lambda m: m.to_dict())
 
+        @router.get("/export")
+        def export_messages(user: CurrentUser = Depends(self._guard)) -> Response:
+            rows = self._contact.export_all(actor=self._actor_name(user))
+            return CsvExporter.response(
+                "messages.csv", rows,
+                ["id", "created_at", "name", "email", "subject", "message", "is_read"])
+
         @router.post("/{message_id}/read")
         def mark_read(message_id: int, user: CurrentUser = Depends(self._guard)) -> dict:
             entry = self._contact.mark_read(message_id, actor=self._actor_name(user))
@@ -338,6 +386,35 @@ class AdminMediaApiController(AdminApiController):
         def delete_file(name: str, user: CurrentUser = Depends(self._guard)) -> dict:
             self._media.delete(name, actor=self._actor_name(user))
             return self.ok({"deleted": name})
+
+
+class AdminRedirectApiController(AdminApiController):
+    prefix = "/api/admin/redirects"
+
+    def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
+                 redirects: RedirectService) -> None:
+        super().__init__(auth_handler, auth_service)
+        self._redirects = redirects
+
+    def _register(self, router: APIRouter) -> None:
+        @router.get("")
+        def list_redirects(page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=100),
+                           user: CurrentUser = Depends(self._guard)) -> dict:
+            result = self._redirects.list_redirects(PageRequest.create(page, size))
+            return self.paginated(result, lambda r: r.to_dict())
+
+        @router.post("", status_code=201)
+        def create_redirect(payload: RedirectRequest,
+                            user: CurrentUser = Depends(self._guard)) -> dict:
+            redirect = Redirect(**payload.model_dump())
+            created = self._redirects.create(redirect, actor=self._actor_name(user))
+            return self.ok(created.to_dict())
+
+        @router.delete("/{redirect_id}")
+        def delete_redirect(redirect_id: int,
+                            user: CurrentUser = Depends(self._guard)) -> dict:
+            self._redirects.delete(redirect_id, actor=self._actor_name(user))
+            return self.ok({"deleted": redirect_id})
 
 
 class AdminBackupApiController(AdminApiController):
@@ -389,6 +466,15 @@ class AdminLogApiController(AdminApiController):
             where, params = ("level = ?", (level,)) if level else (None, ())
             result = self._logs.list_page(PageRequest.create(page, size), where, params)
             return self.paginated(result, lambda log: log.to_dict())
+
+        @router.get("/export")
+        def export_logs(user: CurrentUser = Depends(self._guard)) -> Response:
+            self._logs.add(AuditLog(actor=self._actor_name(user),
+                                    action="logs.exported"))
+            rows = [log.to_dict() for log in self._logs.list_all()]
+            return CsvExporter.response(
+                "audit-logs.csv", rows,
+                ["id", "created_at", "actor", "action", "target", "detail", "level"])
 
 
 class AdminDashboardApiController(AdminApiController):
