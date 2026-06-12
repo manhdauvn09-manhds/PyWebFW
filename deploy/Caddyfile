@@ -1,0 +1,21 @@
+# Caddy reverse proxy — automatic HTTPS (Let's Encrypt + renewal).
+# Domains/upstreams come from environment variables set in docker-compose.yml.
+# With DOMAIN=localhost Caddy serves a locally-trusted self-signed cert (dev).
+
+{$DOMAIN:localhost} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	reverse_proxy {$UPSTREAM_FE:fe:8000}
+}
+
+{$ADMIN_DOMAIN:admin.localhost} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	# Recommended: restrict the admin domain to office/VPN IPs.
+	# Uncomment and adjust:
+	# @outside not remote_ip 203.0.113.0/24 10.8.0.0/16
+	# respond @outside "Forbidden" 403
+
+	reverse_proxy {$UPSTREAM_ADMIN:admin:8000}
+}

@@ -1,0 +1,100 @@
+# Split deployment: FE (public), Admin, and Scheduler each in their own
+# container, sharing one image and one database volume.
+#
+#   docker compose up -d                          # split mode (fe + admin + scheduler)
+#   docker compose --profile allinone up allinone # single-server mode
+#   docker compose --profile proxy up -d caddy    # + HTTPS via Caddy (auto Let's Encrypt)
+#
+# Required env (e.g. in a .env file next to this compose file):
+#   SECURITY_SECRET_KEY=<long random string>
+#   DOMAIN=example.com            (when using the proxy profile)
+#   ADMIN_DOMAIN=admin.example.com
+#
+# SECURITY: app ports are bound to 127.0.0.1 only — public traffic must go
+# through Caddy (80/443), which terminates TLS and adds HSTS.
+#
+# NOTE: the default SQLite-on-shared-volume setup is single-host only.
+# To spread containers across machines, implement BaseDatabaseManager for
+# Postgres/MySQL and point DB settings at that server — nothing else changes.
+
+x-app-base: &app-base
+  build: .
+  image: pywebfw:latest
+  restart: unless-stopped
+  environment: &app-env
+    APP_ENV: production
+    APP_DEBUG: "false"
+    SECURITY_SECRET_KEY: ${SECURITY_SECRET_KEY:?Set SECURITY_SECRET_KEY in .env}
+    DB_PATH: /app/data/app.db
+    TZ: ${TZ:-Asia/Ho_Chi_Minh}
+  volumes:
+    - app-data:/app/data
+
+services:
+  # Public front-end: public pages + public API only. No admin surface at all.
+  fe:
+    <<: *app-base
+    environment:
+      <<: *app-env
+      APP_MODULES: public
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      scheduler:
+        condition: service_healthy   # scheduler boots first and seeds the DB
+
+  # Admin area: admin pages + admin API. Only reachable from localhost or
+  # through the Caddy admin domain.
+  admin:
+    <<: *app-base
+    environment:
+      <<: *app-env
+      APP_MODULES: admin
+    ports:
+      - "127.0.0.1:8002:8000"
+    depends_on:
+      scheduler:
+        condition: service_healthy
+
+  # Scheduler: cron jobs only — exposes /healthz but no public/admin routes.
+  scheduler:
+    <<: *app-base
+    environment:
+      <<: *app-env
+      APP_MODULES: scheduler
+
+  # Optional single-server deployment running every module in one container.
+  allinone:
+    <<: *app-base
+    profiles: ["allinone"]
+    environment:
+      <<: *app-env
+      APP_MODULES: public,admin,scheduler
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  # HTTPS termination: automatic Let's Encrypt certificates + renewal,
+  # HTTP->HTTPS redirect, HSTS. Point your domains' DNS A records at this
+  # host, set DOMAIN/ADMIN_DOMAIN in .env, run with --profile proxy.
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["proxy"]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"      # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN:-admin.localhost}
+      UPSTREAM_FE: ${UPSTREAM_FE:-fe:8000}
+      UPSTREAM_ADMIN: ${UPSTREAM_ADMIN:-admin:8000}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data          # certificates persist across restarts
+      - caddy-config:/config
+
+volumes:
+  app-data:
+  caddy-data:
+  caddy-config:

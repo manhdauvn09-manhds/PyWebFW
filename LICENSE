@@ -1,0 +1,48 @@
+PyWebFW Community License v1.0
+
+Copyright (c) 2026 manhdauvn09-manhds. All rights reserved.
+
+This is a source-available license. It is NOT an open-source license as
+defined by the Open Source Initiative.
+
+1. GRANT
+Subject to the conditions below, the copyright holder grants you a
+non-exclusive, non-transferable, royalty-free license to:
+  a) view, download, and study the source code;
+  b) run and modify the software for personal projects, evaluation,
+     education, and internal use within your own organization;
+  c) build applications on top of the framework for the uses in (b).
+
+2. CONDITIONS AND RESTRICTIONS
+You may NOT, without a separate written commercial agreement with the
+copyright holder:
+  a) redistribute, sublicense, sell, rent, lease, or otherwise make the
+     software or substantial portions of it available to third parties,
+     whether modified or not;
+  b) offer the software, a modified version of it, or a product whose
+     primary value derives from it, as a commercial product or hosted
+     service (including SaaS) to third parties;
+  c) use the software in production for revenue-generating purposes;
+  d) remove or alter copyright, license, or attribution notices;
+  e) use the names "PyWebFW", "pywebfw", or the copyright holder's name
+     to endorse or promote derived products.
+
+3. COMMERCIAL USE AND PRO MODULES
+Commercial production licenses, and the PyWebFW Pro modules (PostgreSQL/
+Redis backends, two-factor authentication, traffic analytics, backup
+manager, redirect manager, media manager, session manager, CSV export,
+and others), are available from the copyright holder:
+https://github.com/manhdauvn09-manhds/PyWebFW
+
+4. CONTRIBUTIONS
+By submitting a contribution you grant the copyright holder a perpetual,
+worldwide, irrevocable, royalty-free right to use, modify, relicense, and
+commercially exploit the contribution as part of the software.
+
+5. TERMINATION
+This license terminates automatically if you violate any of its terms.
+
+6. NO WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE.

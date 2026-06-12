@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PyWebFW — Bộ tài liệu</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html">📘 PyWebFW Docs</a>
+  <a href="architecture-design.html">Architecture</a>
+  <a href="class-design.html">Class Design</a>
+  <a href="srs.html">SRS</a>
+  <a href="guideline.html">Guideline</a>
+  <a href="user-manual.html">User Manual</a>
+</nav>
+<header class="doc-header">
+  <h1>PyWebFW — Bộ tài liệu kỹ thuật</h1>
+  <p>Framework Python hướng đối tượng: Public Front-End · Admin · Public/Admin API · Scheduler.
+     Một codebase — triển khai chung hoặc tách container theo từng module.</p>
+</header>
+<main>
+  <section class="card">
+    <h2>Tài liệu</h2>
+    <div class="doc-grid">
+      <a class="doc-card" href="architecture-design.html">
+        <div class="icon">🏛️</div>
+        <h3>Architecture Design</h3>
+        <p>Kiến trúc phân tầng, sơ đồ deployment Docker, luồng request, design patterns, mô hình bảo mật.</p>
+      </a>
+      <a class="doc-card" href="class-design.html">
+        <div class="icon">🧬</div>
+        <h3>Class Design</h3>
+        <p>Cây kế thừa đầy đủ (Pages, Controllers, Services, Repositories, Scheduler), trách nhiệm và quan hệ giữa các class.</p>
+      </a>
+      <a class="doc-card" href="srs.html">
+        <div class="icon">📋</div>
+        <h3>SRS — Đặc tả yêu cầu</h3>
+        <p>Use case diagram, yêu cầu chức năng (FR) và phi chức năng (NFR) theo từng module, mô hình dữ liệu.</p>
+      </a>
+      <a class="doc-card" href="guideline.html">
+        <div class="icon">🛠️</div>
+        <h3>Development Guideline</h3>
+        <p>Quy tắc phụ thuộc giữa các tầng, coding standards, flowchart thêm tính năng mới, checklist bảo mật.</p>
+      </a>
+      <a class="doc-card" href="user-manual.html">
+        <div class="icon">📖</div>
+        <h3>User Manual</h3>
+        <p>Hướng dẫn cài đặt, deploy bằng PowerShell scripts, sử dụng trang Admin, API reference, xử lý sự cố.</p>
+      </a>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Thông tin nhanh</h2>
+    <table>
+      <tr><th>Hạng mục</th><th>Giá trị</th></tr>
+      <tr><td>Ngôn ngữ / Runtime</td><td>Python 3.11+ (image Docker: python 3.12-slim)</td></tr>
+      <tr><td>HTTP engine</td><td>FastAPI / Starlette / Uvicorn — toàn bộ tầng trên là OOP framework tự sở hữu</td></tr>
+      <tr><td>Database mặc định</td><td>SQLite (pool + idle-close) sau ABC <code>BaseDatabaseManager</code> — thay Postgres/MySQL không sửa tầng trên</td></tr>
+      <tr><td>Triển khai</td><td><code>APP_MODULES</code> = <span class="badge green">public</span> <span class="badge">admin</span> <span class="badge gray">scheduler</span> — gộp hoặc tách container</td></tr>
+      <tr><td>Cổng mặc định</td><td>FE :8001 · Admin :8002 · All-in-one :8000 · Scheduler: chỉ <code>/healthz</code> nội bộ</td></tr>
+      <tr><td>Kiểm thử</td><td>69 test end-to-end (pytest) qua HTTP stack thật + GitHub Actions CI</td></tr>
+      <tr><td>Admin</td><td>14 màn hình quản trị · 2FA TOTP · ép đổi mật khẩu lần đầu · thu hồi token tức thì</td></tr>
+      <tr><td>Tự động hóa</td><td>8 scheduler jobs (health, backup, optimize, traffic, cleanup…) + event bus</td></tr>
+      <tr><td>Deploy scripts</td><td><code>deploy/deploy.ps1</code> (+ wrapper từng service) — local hoặc remote qua SSH</td></tr>
+    </table>
+  </section>
+</main>
+<footer class="doc-footer">PyWebFW Documentation · cập nhật 2026-06-11</footer>
+</body>
+</html>
