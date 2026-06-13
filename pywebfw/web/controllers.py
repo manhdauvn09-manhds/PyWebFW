@@ -109,11 +109,15 @@ class PublicWebController(BaseController):
 
         @router.get("/rss", include_in_schema=False)
         def rss() -> Response:
-            return Response(content=self._build_rss(), media_type="application/rss+xml")
+            response = Response(content=self._build_rss(), media_type="application/rss+xml")
+            response.headers["Cache-Control"] = "public, max-age=3600"
+            return response
 
         @router.get("/sitemap.xml", include_in_schema=False)
         def sitemap_xml() -> Response:
-            return Response(content=self._build_sitemap_xml(), media_type="application/xml")
+            response = Response(content=self._build_sitemap_xml(), media_type="application/xml")
+            response.headers["Cache-Control"] = "public, max-age=86400"
+            return response
 
         @router.get("/robots.txt", include_in_schema=False)
         def robots(request: Request) -> Response:
@@ -123,7 +127,9 @@ class PublicWebController(BaseController):
                 "Disallow: /api/",
                 f"Sitemap: {str(request.base_url).rstrip('/')}/sitemap.xml",
             ]
-            return Response(content="\n".join(lines) + "\n", media_type="text/plain")
+            response = Response(content="\n".join(lines) + "\n", media_type="text/plain")
+            response.headers["Cache-Control"] = "public, max-age=86400"
+            return response
 
     def _add_page_route(self, router: APIRouter, path: str, factory: PageFactory) -> None:
         # Bind per-route via default args (avoids the closure-in-loop pitfall).
