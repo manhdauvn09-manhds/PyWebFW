@@ -26,6 +26,8 @@ from typing import Any, Iterator, Sequence
 from pywebfw.core.exceptions import ConfigurationError, ConflictError, DatabaseError
 from pywebfw.core.logging import BaseLogger
 
+QUERY_TIMEOUT_SECONDS = 30  # Prevent long-running queries; PostgreSQL enforces via statement_timeout
+
 
 class PooledConnection:
     """Wraps a raw connection with bookkeeping for the idle-close policy."""
