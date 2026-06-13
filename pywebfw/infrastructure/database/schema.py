@@ -130,7 +130,9 @@ _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_menus_area_pos ON menus(area, position)",
     "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_contents_published ON contents(is_published, slug)",
+    "CREATE INDEX IF NOT EXISTS idx_contents_created ON contents(created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_traffic_day ON traffic_stats(day)",
+    "CREATE INDEX IF NOT EXISTS idx_contacts_created ON contact_messages(created_at DESC)",
 ]
 
 # Columns added after the initial release: (table, column, DDL fragment).
