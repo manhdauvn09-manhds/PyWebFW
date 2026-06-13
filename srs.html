@@ -28,7 +28,7 @@
     <div class="container">
         <h1>📋 PyWebFW — Software Requirements Specification</h1>
         <p class="meta">
-            Last updated: 2026-06-14 | Version: 0.2.0 (Open-Core)
+            Last updated: 2026-06-14 | Version: 0.2.0 (Open-Core) | <span style="color: #3fb950; font-weight: bold;">5-Cycle Audit Complete ✅</span>
         </p>
 
         <h2>1. Overview</h2>
@@ -81,14 +81,14 @@
             </ul>
         </div>
 
-        <h3>2.4 Security Hardening</h3>
+        <h3>2.4 Security Hardening <span style="color: #3fb950;">✅ Hardened (5-cycle audit)</span></h3>
         <div class="feature-list">
             <ul>
                 <li><span class="changed">debug=False by default (was True)</span></li>
                 <li><span class="changed">token_ttl=3600s (1 hour, was 86400s = 1 day)</span></li>
-                <li>HTTPS via Caddy with auto Let's Encrypt + HSTS</li>
-                <li>Security headers: CSP (per-request nonce), X-Frame-Options, Referrer-Policy</li>
-                <li>HttpOnly/SameSite=Strict cookies</li>
+                <li>HTTPS via Caddy with auto Let's Encrypt + HSTS <span style="color: #3fb950;">✅</span></li>
+                <li>Security headers: CSP (per-request nonce), X-Frame-Options, Referrer-Policy <span style="color: #3fb950;">✅</span></li>
+                <li>HttpOnly/SameSite=Strict cookies <span style="color: #3fb950;">✅</span></li>
                 <li><span class="changed">DB connection pool: 20 (was 5)</span></li>
                 <li><span class="changed">Idle timeout: 300s (was 3600s) — free stale connections</span></li>
                 <li><span class="new">Query timeout: 30s (prevents hanging)</span></li>
