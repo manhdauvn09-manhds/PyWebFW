@@ -125,6 +125,8 @@ _TABLES: dict[str, str] = {
 }
 
 _INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)",
+    "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)",
     "CREATE INDEX IF NOT EXISTS idx_menus_area_pos ON menus(area, position)",
     "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)",
     "CREATE INDEX IF NOT EXISTS idx_contents_published ON contents(is_published, slug)",
