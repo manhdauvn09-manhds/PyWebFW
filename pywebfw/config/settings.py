@@ -169,12 +169,12 @@ class SettingsFactory:
             ),
             name=env.text("APP_NAME", "PyWebFW"),
             environment=env.text("APP_ENV", "development"),
-            debug=env.boolean("APP_DEBUG", True),
+            debug=env.boolean("APP_DEBUG", False),
             host=env.text("APP_HOST", "127.0.0.1"),
             port=env.integer("APP_PORT", 8000),
             database=DatabaseSettings(
                 path=env.text("DB_PATH", "data/app.db"),
-                pool_size=env.integer("DB_POOL_SIZE", 5),
+                pool_size=env.integer("DB_POOL_SIZE", 20),
                 idle_timeout_seconds=env.integer("DB_IDLE_TIMEOUT_SECONDS", 300),
                 driver=env.text("DB_DRIVER", "sqlite"),
                 dsn=env.text("DB_DSN", ""),
@@ -196,8 +196,8 @@ class SettingsFactory:
             rate_limit=RateLimitSettings(
                 max_requests=env.integer("RATELIMIT_MAX_REQUESTS", 120),
                 window_seconds=env.integer("RATELIMIT_WINDOW_SECONDS", 60),
-                login_max_requests=env.integer("RATELIMIT_LOGIN_MAX_REQUESTS", 5),
-                login_window_seconds=env.integer("RATELIMIT_LOGIN_WINDOW_SECONDS", 300),
+                login_max_requests=env.integer("RATELIMIT_LOGIN_MAX_REQUESTS", 3),
+                login_window_seconds=env.integer("RATELIMIT_LOGIN_WINDOW_SECONDS", 180),
             ),
         )
         self._validate(settings)

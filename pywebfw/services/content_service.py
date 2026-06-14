@@ -45,6 +45,19 @@ class ContentService(BaseService, AuditMixin):
     def rss_items(self, limit: int = 20) -> list[ContentItem]:
         return self._contents.list_published()[:limit]
 
+    def json_ld_schema(self, item: ContentItem, base_url: str = "https://example.com") -> dict:
+        """Generate JSON-LD NewsArticle schema for rich snippet (SEO)."""
+        return {
+            "@context": "https://schema.org",
+            "@type": "NewsArticle",
+            "headline": item.seo_title or item.title,
+            "description": item.seo_description or item.summary,
+            "image": [],
+            "datePublished": item.created_at,
+            "dateModified": item.updated_at,
+            "url": f"{base_url}/{item.slug}",
+        }
+
     # --- admin management -------------------------------------------------------
     def list_contents(self, page: PageRequest) -> PageResult[ContentItem]:
         return self._contents.list_page(page)
