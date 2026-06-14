@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Development Guideline — PyWebFW</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<nav class="topnav">
+  <a class="brand" href="index.html">📘 PyWebFW Docs</a>
+  <a href="architecture-design.html">Architecture</a>
+  <a href="class-design.html">Class Design</a>
+  <a href="srs.html">SRS</a>
+  <a class="active" href="guideline.html">Guideline</a>
+  <a href="user-manual.html">User Manual</a>
+</nav>
+<header class="doc-header">
+  <h1>Development Guideline</h1>
+  <p>Quy tắc bắt buộc khi phát triển trên PyWebFW: quy tắc phụ thuộc tầng, chuẩn code, quy trình thêm tính năng, checklist bảo mật.</p>
+</header>
+<main>
+
+<section class="card">
+  <h2>1. Quy tắc phụ thuộc giữa các tầng (bắt buộc)</h2>
+  <table>
+    <tr><th>Tầng (package)</th><th>Được import từ</th><th>CẤM import</th></tr>
+    <tr><td><code>app/domain</code></td><td>stdlib</td><td>Mọi tầng khác (HTTP, SQL, service…)</td></tr>
+    <tr><td><code>app/core</code></td><td>stdlib, fastapi/starlette (riêng routing/middleware)</td><td>services, repositories, web, api</td></tr>
+    <tr><td><code>app/repositories</code></td><td>core, domain, <code>BaseDatabaseManager</code> (ABC)</td><td>sqlite3 trực tiếp, services, web/api</td></tr>
+    <tr><td><code>app/services</code></td><td>core, domain, repositories, ABC hạ tầng (cache/security)</td><td>fastapi Request/Response, web/api</td></tr>
+    <tr><td><code>app/web</code> · <code>app/api</code></td><td>core, services, domain</td><td>repositories trực tiếp (trừ đọc thuần như LogRepository cho trang log)</td></tr>
+    <tr><td><code>app/scheduler</code></td><td>core, services, repositories, ABC hạ tầng</td><td>web, api</td></tr>
+    <tr><td><code>app/bootstrap.py</code></td><td>TẤT CẢ — đây là nơi duy nhất biết class cụ thể</td><td>—</td></tr>
+  </table>
+  <div class="note">Nguyên tắc vàng: <strong>tầng trên chỉ biết ABC của tầng dưới</strong>. Nếu phải import một class cụ thể
+  (ví dụ <code>SQLiteDatabaseManager</code>) ở ngoài bootstrap — thiết kế đang sai, dừng lại và sửa.</div>
+</section>
+
+<section class="card">
+  <h2>2. Flowchart: thêm tính năng mới</h2>
+  <figure class="diagram">
+  <svg viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arg" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto">
+        <path d="M0,0 L8,3.5 L0,7 z" fill="#64748b"/>
+      </marker>
+    </defs>
+    <rect x="420" y="14" width="160" height="40" rx="20" class="c-term"/>
+    <text x="500" y="39" text-anchor="middle" class="t-title">Yêu cầu mới</text>
+    <line x1="500" y1="54" x2="500" y2="86" class="edge" marker-end="url(#arg)"/>
+    <polygon points="500,88 600,130 500,172 400,130" class="c-dec"/>
+    <text x="500" y="126" text-anchor="middle">Loại tính năng?</text>
+    <text x="500" y="142" text-anchor="middle" class="t-small">page / api / job / domain</text>
+    <!-- branch: page -->
+    <line x1="400" y1="130" x2="160" y2="130" class="edge" marker-end="url(#arg)"/>
+    <text x="280" y="122" text-anchor="middle" class="t-small">Trang web</text>
+    <rect x="40" y="190" width="240" height="64" rx="8" class="c-stepb"/>
+    <text x="160" y="212" text-anchor="middle">1. Subclass PublicPage/AdminPage</text>
+    <text x="160" y="230" text-anchor="middle" class="t-small">(trang CMS → subclass ContentPage + slug)</text>
+    <text x="160" y="246" text-anchor="middle" class="t-small">2. Implement build_content() + seo()</text>
+    <line x1="160" y1="130" x2="160" y2="188" class="edge"/>
+    <line x1="160" y1="254" x2="160" y2="286" class="edge" marker-end="url(#arg)"/>
+    <rect x="40" y="288" width="240" height="48" rx="8" class="c-stepb"/>
+    <text x="160" y="308" text-anchor="middle">3. Thêm 1 route trong</text>
+    <text x="160" y="326" text-anchor="middle" class="t-small">Public/AdminWebController</text>
+    <!-- branch: api -->
+    <line x1="500" y1="172" x2="500" y2="204" class="edge" marker-end="url(#arg)"/>
+    <text x="540" y="192" class="t-small">API resource</text>
+    <rect x="380" y="206" width="240" height="64" rx="8" class="c-stepb"/>
+    <text x="500" y="228" text-anchor="middle">1. Subclass BaseApiController</text>
+    <text x="500" y="246" text-anchor="middle" class="t-small">(cần RBAC → AdminApiController)</text>
+    <text x="500" y="262" text-anchor="middle" class="t-small">2. DTO Pydantic + _register(router)</text>
+    <line x1="500" y1="270" x2="500" y2="302" class="edge" marker-end="url(#arg)"/>
+    <rect x="380" y="304" width="240" height="48" rx="8" class="c-stepb"/>
+    <text x="500" y="324" text-anchor="middle">3. Đăng ký controller trong</text>
+    <text x="500" y="342" text-anchor="middle" class="t-small">bootstrap._register_controllers</text>
+    <!-- branch: job -->
+    <line x1="600" y1="130" x2="840" y2="130" class="edge" marker-end="url(#arg)"/>
+    <text x="720" y="122" text-anchor="middle" class="t-small">Job định kỳ</text>
+    <rect x="720" y="190" width="240" height="64" rx="8" class="c-stepb"/>
+    <text x="840" y="212" text-anchor="middle">1. Subclass BaseSchedulerJob</text>
+    <text x="840" y="230" text-anchor="middle" class="t-small">name + schedule + retry_policy</text>
+    <text x="840" y="246" text-anchor="middle" class="t-small">2. Implement run() → message</text>
+    <line x1="840" y1="130" x2="840" y2="188" class="edge"/>
+    <line x1="840" y1="254" x2="840" y2="286" class="edge" marker-end="url(#arg)"/>
+    <rect x="720" y="288" width="240" height="48" rx="8" class="c-stepb"/>
+    <text x="840" y="308" text-anchor="middle">3. registry.register(...) trong</text>
+    <text x="840" y="326" text-anchor="middle" class="t-small">bootstrap._build_scheduler</text>
+    <!-- domain mới (chung) -->
+    <polygon points="500,380 620,420 500,460 380,420" class="c-dec"/>
+    <text x="500" y="416" text-anchor="middle">Cần bảng/domain mới?</text>
+    <line x1="160" y1="336" x2="160" y2="420 " class="edge"/>
+    <line x1="160" y1="420" x2="378" y2="420" class="edge" marker-end="url(#arg)"/>
+    <line x1="500" y1="352" x2="500" y2="378" class="edge" marker-end="url(#arg)"/>
+    <line x1="840" y1="336" x2="840" y2="420" class="edge"/>
+    <line x1="840" y1="420" x2="622" y2="420" class="edge" marker-end="url(#arg)"/>
+    <rect x="70" y="480" width="420" height="56" rx="8" class="c-stepb"/>
+    <text x="280" y="502" text-anchor="middle">Có: Entity (BaseEntity) → DDL (schema.py) →</text>
+    <text x="280" y="520" text-anchor="middle">Repository (BaseRepository[T]) → Service (BaseService)</text>
+    <line x1="440" y1="460" x2="330" y2="478" class="edge" marker-end="url(#arg)"/>
+    <text x="372" y="466" class="t-small">Có</text>
+    <rect x="560" y="480" width="320" height="56" rx="20" class="c-term"/>
+    <text x="720" y="502" text-anchor="middle" class="t-title">Viết test (pytest) → chạy 21+ test xanh</text>
+    <text x="720" y="520" text-anchor="middle" class="t-small">→ deploy bằng deploy/*.ps1</text>
+    <line x1="560" y1="460" x2="666" y2="478" class="edge" marker-end="url(#arg)"/>
+    <text x="630" y="466" class="t-small">Không</text>
+    <line x1="490" y1="520" x2="558" y2="514" class="edge" marker-end="url(#arg)"/>
+  </svg>
+  <figcaption>Hình 2.1 — Quy trình chuẩn thêm tính năng: luôn kết thúc bằng test xanh trước khi deploy.</figcaption>
+  </figure>
+</section>
+
+<section class="card">
+  <h2>3. Coding standards</h2>
+  <ul class="checklist">
+    <li>Type hints ở mọi chữ ký hàm/method; <code>from __future__ import annotations</code> đầu file.</li>
+    <li>Class nhỏ, một trách nhiệm (SRP); không god-object; không file "tiện ích" hỗn tạp.</li>
+    <li>Đặt tên theo mẫu sẵn có: <code>XxxService</code>, <code>XxxRepository</code>, <code>XxxPage</code>, <code>XxxJob</code>, <code>XxxApiController</code>.</li>
+    <li>Field private prefix <code>_</code>; expose qua property/method, không expose dict nội bộ.</li>
+    <li>Lỗi nghiệp vụ: raise subclass của <code>FrameworkError</code> — KHÔNG raise <code>HTTPException</code> trong service/repo.</li>
+    <li>Log qua <code>LoggerFactory.get(...)</code> với fields có cấu trúc — không <code>print()</code>.</li>
+    <li>Docstring cho class/method public giải thích <em>vì sao</em>, không kể lại code.</li>
+    <li>Dataclass cho value object (frozen nếu bất biến); Pydantic chỉ ở biên API.</li>
+  </ul>
+  <h3>Quy tắc dữ liệu</h3>
+  <ul class="checklist">
+    <li>SQL luôn parameterized (<code>?</code>); cấm f-string nối giá trị vào SQL.</li>
+    <li>Cột sort phải nằm trong <code>sortable_columns</code> whitelist của repository.</li>
+    <li>Ghi nhiều bảng liên quan → bọc trong <code>UnitOfWork</code>.</li>
+    <li>Mọi output HTML/XML đi qua <code>esc()</code> / <code>xml_escape</code> — kể cả dữ liệu "chắc chắn an toàn".</li>
+    <li>Serialization entity nhạy cảm dùng method chuyên dụng (<code>to_public_dict</code>, <code>to_safe_dict</code>).</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>4. Checklist trước khi merge / deploy</h2>
+  <table>
+    <tr><th>#</th><th>Mục kiểm tra</th></tr>
+    <tr><td>1</td><td><code>pytest -q</code> xanh toàn bộ (hiện tại 21 test); tính năng mới có test đi kèm</td></tr>
+    <tr><td>2</td><td>Không import class cụ thể của hạ tầng ngoài <code>bootstrap.py</code></td></tr>
+    <tr><td>3</td><td>Endpoint mới: có guard đúng (RoleGuard cho admin), có phân trang nếu trả danh sách</td></tr>
+    <tr><td>4</td><td>Hành động ghi dữ liệu có audit log kèm actor</td></tr>
+    <tr><td>5</td><td>Không lộ secret/password/stack trace trong response và log</td></tr>
+    <tr><td>6</td><td>Schema thay đổi: DDL idempotent (<code>IF NOT EXISTS</code>) + cân nhắc index</td></tr>
+    <tr><td>7</td><td>Job mới: có retry policy hợp lý, message kết quả rõ ràng, không nuốt exception</td></tr>
+    <tr><td>8</td><td>Chạy thử đúng chế độ module sẽ deploy (<code>APP_MODULES</code>)</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>5. Quy trình test</h2>
+  <pre>.\.venv\Scripts\python -m pytest -q              # toàn bộ
+.\.venv\Scripts\python -m pytest tests\test_admin.py -q   # một nhóm
+.\.venv\Scripts\python -m pytest -k "search" -q  # theo từ khóa</pre>
+  <ul class="checklist">
+    <li>Test qua <code>TestClient</code> + <code>ApplicationBuilder(build_test_settings(...))</code> — không mock tầng giữa.</li>
+    <li>DB test là file tạm (tmp_path) — không đụng <code>data/app.db</code>.</li>
+    <li>Test bảo mật là bắt buộc với endpoint mới: thiếu token → 401, sai role → 403, payload sai → 422.</li>
+    <li>Job mới: gọi <code>engine.run_job_now(name)</code> và assert <code>JobStatus.SUCCESS</code>.</li>
+  </ul>
+</section>
+
+</main>
+<footer class="doc-footer">PyWebFW Documentation · Development Guideline · 2026-06-11</footer>
+</body>
+</html>
