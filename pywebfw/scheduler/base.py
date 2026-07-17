@@ -10,8 +10,8 @@ from __future__ import annotations
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import Enum
 
 from pywebfw.core.logging import LoggerFactory
@@ -76,15 +76,26 @@ class DailyTimeSchedule(Schedule):
 
     hour: int
     minute: int = 0
-    _day_seconds: float = field(default=86400.0, repr=False)
 
     def is_due(self, last_run_monotonic: float | None, now_monotonic: float) -> bool:
         now = datetime.now()
-        past_target = (now.hour, now.minute) >= (self.hour, self.minute)
+        target = now.replace(hour=self.hour, minute=self.minute,
+                             second=0, microsecond=0)
+        if now < target:
+            return False
         if last_run_monotonic is None:
-            return past_target
-        ran_today = (now_monotonic - last_run_monotonic) < self._day_seconds
-        return past_target and not ran_today
+            return True
+        # The runner only hands us monotonic values, so recover the last run's
+        # wall-clock time from the elapsed delta. Due iff that run predates
+        # today's target — i.e. this target has not been served yet.
+        #
+        # Deliberately NOT "less than 24h since the last run": that makes the job
+        # fire exactly 24h after the previous run rather than at HH:MM, so the
+        # time silently drifts to whenever the process last started (monotonic
+        # resets to ~0 on boot, so the first check fires immediately). On mcp-80
+        # this pinned the 02:30 backup to 14:20 — the container's start time.
+        last_run_wall = now - timedelta(seconds=now_monotonic - last_run_monotonic)
+        return last_run_wall < target
 
     def describe(self) -> str:
         return f"daily at {self.hour:02d}:{self.minute:02d}"

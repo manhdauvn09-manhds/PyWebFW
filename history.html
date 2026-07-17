@@ -36,6 +36,18 @@
             </thead>
             <tbody>
                 <tr>
+                    <td class="date">2026-07-17</td>
+                    <td class="commit">scheduler</td>
+                    <td><strong>Fix: <code>DailyTimeSchedule</code> ran at process start time, not at its configured hour</strong><br>
+                        • A job declared <code>DailyTimeSchedule(hour=3, minute=30)</code> did not run at 03:30. It came due 24h after its previous run, and the first run happened at boot &mdash; so the job pinned itself to whatever time the process started, and drifted again on every restart.<br>
+                        • Cause: the due check asked <em>&ldquo;has it run in the last 86400s?&rdquo;</em>, which is not the same question as <em>&ldquo;has it run today?&rdquo;</em>. The monotonic clock restarts near zero with the process, so the first check after boot always fired.<br>
+                        • Affects <code>DatabaseOptimizeJob</code> (declared 03:30) in this edition: it was running at container start time instead of the intended off-peak window.<br>
+                        • Fixed by recovering the last run's wall-clock time from the monotonic delta and comparing it against today's target, so each day's target is served exactly once.<br>
+                        • <code>DailyTimeSchedule</code> previously had <strong>no test coverage</strong> &mdash; 6 tests added, including a regression test that fails against the old implementation.
+                    </td>
+                    <td class="success">✅ Released</td>
+                </tr>
+                <tr>
                     <td class="date">2026-06-14 00:35</td>
                     <td class="commit">9b6bafc</td>
                     <td><strong>✅ Cycle 5/5: 5-Cycle Audit Complete — System Production Hardened</strong><br>
