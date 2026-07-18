@@ -10,7 +10,7 @@ from typing import Callable
 from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from pywebfw.config.settings import AppSettings
 from pywebfw.core.exceptions import AuthenticationError, AuthorizationError
@@ -19,13 +19,10 @@ from pywebfw.domain.models import MenuArea, Role
 from pywebfw.infrastructure.auth.manager import BaseAuthHandler, CurrentUser
 from pywebfw.repositories.log_repository import LogRepository
 from pywebfw.scheduler.engine import SchedulerEngine
-from pywebfw.services.backup_service import BackupService
 from pywebfw.services.contact_service import ContactService
 from pywebfw.services.content_service import ContentService
 from pywebfw.services.dashboard_service import DashboardService
-from pywebfw.services.media_service import MediaService
 from pywebfw.services.menu_service import MenuService
-from pywebfw.services.redirect_service import RedirectService
 from pywebfw.services.search_service import SearchService
 from pywebfw.services.site_settings_service import SiteSettingsService
 from pywebfw.services.system_service import SystemService
@@ -34,17 +31,13 @@ from pywebfw.web.pages.admin import (
     AdminHomePage,
     AdminLoginPage,
     AdminPasswordChangePage,
-    BackupManagerPage,
     ContactMessagesPage,
     ContentManagementPage,
     DashboardPage,
     DbConnectionManagementPage,
     JobsMonitorPage,
     LogManagementPage,
-    MediaManagerPage,
     MenuManagementPage,
-    RedirectManagementPage,
-    SessionManagerPage,
     SettingsPage,
     UserManagementPage,
 )
@@ -199,26 +192,7 @@ class AdminWebDeps:
     contents: ContentService
     site_settings: SiteSettingsService
     contact: ContactService
-    media: MediaService
-    backups: BackupService
-    redirects: RedirectService
     engine: SchedulerEngine | None = None
-
-
-class MediaWebController(BaseController):
-    """Serves uploaded media files. Registered for both the public site
-    (content images) and the admin area (previews)."""
-
-    tags = ["media"]
-
-    def __init__(self, media: MediaService) -> None:
-        self._media = media
-
-    def _register(self, router: APIRouter) -> None:
-        @router.get("/media/{name}", include_in_schema=False)
-        def serve_media(name: str) -> FileResponse:
-            path = self._media.resolve_path(name)   # strict name validation
-            return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
 
 class AdminWebController(BaseController):
@@ -265,12 +239,8 @@ class AdminWebController(BaseController):
             "/menus": lambda ctx: MenuManagementPage(ctx, deps.menus),
             "/contents": lambda ctx: ContentManagementPage(ctx, deps.contents),
             "/messages": lambda ctx: ContactMessagesPage(ctx, deps.contact),
-            "/media": lambda ctx: MediaManagerPage(ctx, deps.media),
             "/jobs": lambda ctx: JobsMonitorPage(ctx, deps.engine),
             "/settings": lambda ctx: SettingsPage(ctx, deps.site_settings),
-            "/sessions": lambda ctx: SessionManagerPage(ctx, deps.users, deps.logs),
-            "/redirects": lambda ctx: RedirectManagementPage(ctx, deps.redirects),
-            "/backups": lambda ctx: BackupManagerPage(ctx, deps.backups),
             "/logs": lambda ctx: LogManagementPage(ctx, deps.logs),
             "/db-connections": lambda ctx: DbConnectionManagementPage(ctx, deps.system),
         }

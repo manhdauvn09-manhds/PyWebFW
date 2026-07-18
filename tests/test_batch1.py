@@ -5,32 +5,6 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
-def test_traffic_is_counted_and_reported(client: TestClient,
-                                         auth_headers: dict[str, str]) -> None:
-    for _ in range(3):
-        assert client.get("/").status_code == 200
-    assert client.get("/about").status_code == 200
-
-    metrics = client.get("/api/admin/dashboard/metrics", headers=auth_headers).json()
-    traffic = metrics["data"]["traffic"]
-    assert traffic["today_hits"] >= 4
-    assert traffic["online"] >= 1
-    assert any(row["path"] == "/" for row in traffic["top_pages"])
-    assert len(traffic["series"]) >= 1
-    assert traffic["series"][-1]["uniques"] >= 1
-
-
-def test_admin_and_api_requests_are_not_counted(client: TestClient,
-                                                auth_headers: dict[str, str]) -> None:
-    before = client.get("/api/admin/dashboard/metrics",
-                        headers=auth_headers).json()["data"]["traffic"]["today_hits"]
-    client.get("/api/public/menus")
-    client.get("/healthz")
-    after = client.get("/api/admin/dashboard/metrics",
-                       headers=auth_headers).json()["data"]["traffic"]["today_hits"]
-    assert after == before
-
-
 def test_robots_txt(client: TestClient) -> None:
     response = client.get("/robots.txt")
     assert response.status_code == 200
@@ -109,7 +83,7 @@ def test_jobs_monitor_page_and_run_now(client: TestClient,
     listed = client.get("/api/admin/system/jobs", headers=auth_headers).json()
     assert listed["data"]["available"] is True
     job_names = [entry["job"] for entry in listed["data"]["jobs"]]
-    assert "traffic-flush" in job_names
+    assert "database-health-check" in job_names
 
     run = client.post("/api/admin/system/jobs/database-health-check/run",
                       headers=auth_headers)

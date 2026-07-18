@@ -1,8 +1,7 @@
-﻿"""HTTP middleware (Chain of Responsibility via Starlette's middleware stack)."""
+"""HTTP middleware (Chain of Responsibility via Starlette's middleware stack)."""
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import secrets
 import time
 
@@ -15,7 +14,6 @@ from pywebfw.core.logging import LoggerFactory
 from pywebfw.core.responses import ApiResponse
 from pywebfw.core.security import SlidingWindowRateLimiter
 from pywebfw.services.site_settings_service import SiteSettingsService
-from pywebfw.services.traffic_service import TrafficService, today_utc
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -79,31 +77,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-class TrafficTrackingMiddleware(BaseHTTPMiddleware):
-    """Counts public page views + tracks online presence — memory only on the
-    request path; batched flushes persist the counters (see TrafficService)."""
-
-    _EXCLUDED_PREFIXES = ("/api/", "/admin", "/healthz", "/favicon",
-                          "/robots.txt", "/sitemap.xml", "/rss", "/openapi.json")
-
-    def __init__(self, app, traffic: TrafficService) -> None:
-        super().__init__(app)
-        self._traffic = traffic
-
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        response = await call_next(request)
-        if (request.method == "GET" and response.status_code < 400
-                and not request.url.path.startswith(self._EXCLUDED_PREFIXES)):
-            ip = request.client.host if request.client else "unknown"
-            agent = request.headers.get("user-agent", "")
-            # Daily-rotating anonymous visitor hash — raw IPs are never stored.
-            visitor = hashlib.sha256(
-                f"{ip}|{agent}|{today_utc()}".encode()).hexdigest()[:16]
-            self._traffic.record_request(request.url.path, visitor)
-            await asyncio.to_thread(self._traffic.maybe_flush)
-        return response
-
-
 class MaintenanceMiddleware(BaseHTTPMiddleware):
     """When the maintenance_mode setting is on, the public site answers 503;
     the admin area and health probes stay reachable so it can be turned off."""
@@ -147,7 +120,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         if not request.url.path.startswith(self._CSP_EXEMPT_PREFIXES):
             response.headers.setdefault(
                 "Content-Security-Policy",
@@ -156,4 +128,3 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
             )
         return response
-

@@ -12,19 +12,15 @@ from pywebfw.core.exceptions import NotFoundError
 from pywebfw.core.pagination import PageRequest
 from pywebfw.domain.models import ContentItem
 from pywebfw.scheduler.engine import SchedulerEngine
-from pywebfw.services.backup_service import BackupService
 from pywebfw.services.contact_service import ContactService
 from pywebfw.services.content_service import ContentService
 from pywebfw.services.dashboard_service import DashboardService
-from pywebfw.services.media_service import MediaService
 from pywebfw.services.menu_service import MenuService
-from pywebfw.services.redirect_service import RedirectService
 from pywebfw.services.site_settings_service import KNOWN_SETTINGS, SiteSettingsService
 from pywebfw.services.system_service import SystemService
 from pywebfw.services.user_service import UserService
 from pywebfw.repositories.log_repository import LogRepository
 from pywebfw.web.components import (
-    BarChartComponent,
     PaginationComponent,
     SeoMeta,
     StatCardWidget,
@@ -43,7 +39,6 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   const body = JSON.stringify({
     username: form.username.value,
     password: form.password.value,
-    otp: form.otp.value || null,
   });
   const res = await fetch('/api/admin/auth/login', {
     method: 'POST',
@@ -54,10 +49,6 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   if (payload.success) {
     window.location = payload.data.user.must_change_password
       ? '/admin/change-password' : '/admin';
-  }
-  else if (payload.error?.details?.reason === 'otp_required') {
-    document.getElementById('otp-row').classList.remove('hidden');
-    message.textContent = 'Enter the code from your authenticator app.';
   }
   else { message.textContent = payload.error?.message || 'Login failed'; }
 });
@@ -112,51 +103,10 @@ class AdminLoginPage(BasePage):
             '<form id="login-form" class="app-form">'
             '<label>Username<input name="username" required></label>'
             '<label>Password<input name="password" type="password" required></label>'
-            '<div id="otp-row" class="hidden"><label>One-time code'
-            '<input name="otp" inputmode="numeric" autocomplete="one-time-code"'
-            ' maxlength="10"></label></div>'
             "<button type=\"submit\">Sign in</button>"
             '<div class="form-message" role="alert"></div></form>'
             f"{script}"
         )
-
-
-_TOTP_SCRIPT = """
-<script nonce="__NONCE__">
-const tfa = document.getElementById('tfa');
-const tfaMessage = tfa.querySelector('.form-message');
-const post = async (url, body) => {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-    body: body ? JSON.stringify(body) : null,
-  });
-  return res.json();
-};
-const setupBtn = document.getElementById('tfa-setup');
-if (setupBtn) setupBtn.addEventListener('click', async () => {
-  const result = await post('/api/admin/auth/2fa/setup');
-  if (!result.success) { tfaMessage.textContent = result.error?.message; return; }
-  document.getElementById('tfa-secret').textContent = result.data.secret;
-  document.getElementById('tfa-uri').textContent = result.data.otpauth_uri;
-  document.getElementById('tfa-confirm').classList.remove('hidden');
-});
-const enableBtn = document.getElementById('tfa-enable');
-if (enableBtn) enableBtn.addEventListener('click', async () => {
-  const result = await post('/api/admin/auth/2fa/enable',
-    {otp: document.getElementById('tfa-otp').value});
-  if (result.success) { window.location.reload(); }
-  else { tfaMessage.textContent = result.error?.message || 'Invalid code'; }
-});
-const disableBtn = document.getElementById('tfa-disable');
-if (disableBtn) disableBtn.addEventListener('click', async () => {
-  const result = await post('/api/admin/auth/2fa/disable',
-    {otp: document.getElementById('tfa-otp-off').value});
-  if (result.success) { window.location.reload(); }
-  else { tfaMessage.textContent = result.error?.message || 'Invalid code'; }
-});
-</script>
-"""
 
 
 class AdminPasswordChangePage(AdminPage):
@@ -168,36 +118,8 @@ class AdminPasswordChangePage(AdminPage):
     def title(self) -> str:
         return "Account Security"
 
-    def _totp_section(self) -> str:
-        enabled = bool(self._ctx.user and self._ctx.user.totp_enabled)
-        if enabled:
-            body = (
-                "<p>Status: <strong>enabled</strong> ✅</p>"
-                '<label>One-time code<input id="tfa-otp-off" inputmode="numeric"'
-                ' maxlength="10"></label>'
-                '<button type="button" id="tfa-disable">Disable 2FA</button>'
-            )
-        else:
-            body = (
-                "<p>Status: <strong>disabled</strong> — protect this account with "
-                "an authenticator app (Google Authenticator, Authy, 1Password...).</p>"
-                '<button type="button" id="tfa-setup">Set up 2FA</button>'
-                '<div id="tfa-confirm" class="hidden">'
-                "<p>1. Add this secret to your authenticator app:</p>"
-                '<p><code id="tfa-secret"></code></p>'
-                '<p><small>URI: <code id="tfa-uri"></code></small></p>'
-                "<p>2. Enter the generated code to confirm:</p>"
-                '<label>One-time code<input id="tfa-otp" inputmode="numeric"'
-                ' maxlength="10"></label>'
-                '<button type="button" id="tfa-enable">Enable 2FA</button></div>'
-            )
-        return (f'<div id="tfa" class="app-form"><h2>Two-factor authentication</h2>'
-                f'{body}<div class="form-message" role="alert"></div></div>')
-
     def build_content(self) -> str:
-        nonce = esc(self._ctx.csp_nonce)
-        pw_script = _CHANGE_PASSWORD_SCRIPT.replace("__NONCE__", nonce)
-        totp_script = _TOTP_SCRIPT.replace("__NONCE__", nonce)
+        pw_script = _CHANGE_PASSWORD_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
         return (
             "<h1>Account security</h1>"
             "<h2>Change password</h2>"
@@ -209,7 +131,7 @@ class AdminPasswordChangePage(AdminPage):
             ' minlength="8" required></label>'
             '<button type="submit">Update password</button>'
             '<div class="form-message" role="alert"></div></form>'
-            f"{pw_script}{self._totp_section()}{totp_script}"
+            f"{pw_script}"
         )
 
 
@@ -237,20 +159,9 @@ class DashboardPage(AdminPage):
 
     def build_content(self) -> str:
         metrics = self._dashboard.metrics()
-        traffic = metrics["traffic"]
-        cards = StatCardWidget("Online Now", traffic["online"]).render()
-        cards += StatCardWidget("Views Today", traffic["today_hits"]).render()
-        cards += "".join(
+        cards = "".join(
             StatCardWidget(label.replace("_", " ").title(), value).render()
             for label, value in metrics["counts"].items()
-        )
-        chart = BarChartComponent(
-            [(row["day"][5:], row["hits"]) for row in traffic["series"]],
-            title="Page views — last 7 days",
-        )
-        top_pages = TableComponent(
-            ["Path", "Hits (7d)"],
-            [(row["path"], row["hits"]) for row in traffic["top_pages"]],
         )
         db = metrics["database"]
         health = ("OK" if db.get("healthy") else "DOWN") + f' ({db.get("latency_ms", "?")} ms)'
@@ -260,8 +171,6 @@ class DashboardPage(AdminPage):
              for log in metrics["recent_logs"]],
         )
         return (f"<h1>Dashboard</h1><div>{cards}</div>"
-                f"{chart.render()}"
-                f"<h2>Top pages</h2>{top_pages.render()}"
                 f"<p>Database: <strong>{esc(health)}</strong> — "
                 f"Cache entries: {esc(metrics['cache']['entries'])}</p>"
                 f"<h2>Recent activity</h2>{recent.render()}")
@@ -322,16 +231,14 @@ class UserManagementPage(AdminPage):
         rows = "".join(
             f"<tr><td>{esc(u.id)}</td><td>{esc(u.username)}</td><td>{esc(u.email)}</td>"
             f"<td>{esc(u.role.value)}</td><td>{'yes' if u.is_active else 'no'}</td>"
-            f"<td>{'on' if u.totp_enabled else 'off'}</td>"
             f'<td><a href="/admin/users?edit={esc(u.id)}">Edit</a></td></tr>'
             for u in result.items
         )
         parts = [
             f"<h1>Users ({result.total})</h1>",
-            '<p><a href="/admin/users?new=1">+ New user</a> · '
-            '<a href="/api/admin/users/export">Export CSV</a></p>',
+            '<p><a href="/admin/users?new=1">+ New user</a></p>',
             '<table class="data-table"><thead><tr><th>ID</th><th>Username</th>'
-            "<th>Email</th><th>Role</th><th>Active</th><th>2FA</th><th></th></tr></thead>"
+            "<th>Email</th><th>Role</th><th>Active</th><th></th></tr></thead>"
             f"<tbody>{rows}</tbody></table>",
             PaginationComponent(result.page, result.pages, "/admin/users").render(),
         ]
@@ -494,7 +401,6 @@ class LogManagementPage(AdminPage):
              for l in result.items],
         )
         return (f"<h1>Audit / Action Logs ({result.total})</h1>"
-                '<p><a href="/api/admin/logs/export">Export CSV</a></p>'
                 f"{table.render()}"
                 f"{PaginationComponent(result.page, result.pages, '/admin/logs').render()}")
 
@@ -759,200 +665,11 @@ class ContactMessagesPage(AdminPage):
             for m in result.items
         ) or '<tr><td colspan="7">No messages</td></tr>'
         return (f"<h1>Messages ({result.total} — {self._contact.unread_count()} unread)</h1>"
-                '<p><a href="/api/admin/messages/export">Export CSV</a></p>'
                 '<table class="data-table"><thead><tr><th>Date</th><th>Name</th>'
                 "<th>Email</th><th>Subject</th><th>Message</th><th>Status</th><th></th>"
                 f"</tr></thead><tbody>{rows}</tbody></table>"
                 f"{PaginationComponent(result.page, result.pages, '/admin/messages').render()}"
                 f"{_action_script(self._ctx.csp_nonce)}")
-
-
-_MEDIA_UPLOAD_SCRIPT = """
-<script nonce="__NONCE__">
-const uploadForm = document.getElementById('upload-form');
-uploadForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const message = uploadForm.querySelector('.form-message');
-  const fileInput = uploadForm.elements['file'];
-  if (!fileInput.files.length) { message.textContent = 'Choose a file first.'; return; }
-  const body = new FormData();
-  body.append('file', fileInput.files[0]);
-  const res = await fetch('/api/admin/media', {
-    method: 'POST', headers: {'X-Requested-With': 'fetch'}, body,
-  });
-  const result = await res.json();
-  if (result.success) { window.location.reload(); }
-  else { message.textContent = result.error?.message || 'Upload failed'; }
-});
-</script>
-"""
-
-
-class MediaManagerPage(AdminPage):
-    """Upload and manage media files served under /media/."""
-
-    def __init__(self, ctx: PageContext, media: MediaService) -> None:
-        super().__init__(ctx)
-        self._media = media
-
-    @property
-    def title(self) -> str:
-        return "Media Manager"
-
-    def build_content(self) -> str:
-        files = self._media.list_files()
-        rows = "".join(
-            f'<tr><td><a href="{esc(f["url"])}" target="_blank">{esc(f["name"])}</a></td>'
-            f"<td>{f['size_bytes'] // 1024} KB</td><td>{esc(f['modified_at'])}</td>"
-            f"<td><code>{esc(f['url'])}</code></td>"
-            f'<td><button data-action="/api/admin/media/{esc(f["name"])}"'
-            f' data-method="DELETE" data-confirm="Delete this file?">Delete</button></td></tr>'
-            for f in files
-        ) or '<tr><td colspan="5">No files uploaded yet</td></tr>'
-        upload_script = _MEDIA_UPLOAD_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
-        return (f"<h1>Media ({len(files)})</h1>"
-                '<form id="upload-form" class="app-form">'
-                '<label>Upload file (jpg, png, gif, webp, pdf)'
-                '<input type="file" name="file" required></label>'
-                '<button type="submit">Upload</button>'
-                '<div class="form-message" role="alert"></div></form>'
-                '<table class="data-table"><thead><tr><th>File</th><th>Size</th>'
-                "<th>Uploaded</th><th>URL</th><th></th></tr></thead>"
-                f"<tbody>{rows}</tbody></table>"
-                f"{upload_script}{_action_script(self._ctx.csp_nonce)}")
-
-
-class SessionManagerPage(AdminPage):
-    """Active-session overview: last login per user + revoke-everywhere."""
-
-    def __init__(self, ctx: PageContext, users: UserService,
-                 logs: LogRepository) -> None:
-        super().__init__(ctx)
-        self._users = users
-        self._logs = logs
-
-    @property
-    def title(self) -> str:
-        return "Session Manager"
-
-    def build_content(self) -> str:
-        result = self._users.list_users(PageRequest.create(size=100))
-        last_logins = self._logs.last_login_map()
-        rows = "".join(
-            f"<tr><td>{esc(u.username)}</td><td>{esc(u.role.value)}</td>"
-            f"<td>{'yes' if u.is_active else 'no'}</td>"
-            f"<td>{esc(last_logins.get(u.username, 'never'))}</td>"
-            f'<td><button data-action="/api/admin/users/{esc(u.id)}/revoke-sessions"'
-            f' data-confirm="Revoke all sessions of {esc(u.username)}?">'
-            f"Revoke sessions</button></td></tr>"
-            for u in result.items
-        )
-        return (f"<h1>Sessions ({result.total} users)</h1>"
-                "<p>Revoking invalidates every token of that user immediately "
-                "(they must sign in again on all devices).</p>"
-                '<table class="data-table"><thead><tr><th>User</th><th>Role</th>'
-                "<th>Active</th><th>Last login</th><th></th></tr></thead>"
-                f"<tbody>{rows}</tbody></table>"
-                f"{_action_script(self._ctx.csp_nonce)}")
-
-
-class BackupManagerPage(AdminPage):
-    """List, create, download and delete database backups."""
-
-    def __init__(self, ctx: PageContext, backups: BackupService) -> None:
-        super().__init__(ctx)
-        self._backups = backups
-
-    @property
-    def title(self) -> str:
-        return "Backups"
-
-    def build_content(self) -> str:
-        if not self._backups.supported:
-            return ("<h1>Backups</h1><p>Online backup is only available for "
-                    "file-based SQLite. Use pg_dump / managed backups for "
-                    "this database engine.</p>")
-        backups = self._backups.list_backups()
-        rows = "".join(
-            f"<tr><td>{esc(b['name'])}</td><td>{b['size_bytes'] // 1024} KB</td>"
-            f"<td>{esc(b['created_at'])}</td>"
-            f'<td><a href="/api/admin/backups/{esc(b["name"])}/download">Download</a> '
-            f'<button data-action="/api/admin/backups/{esc(b["name"])}"'
-            f' data-method="DELETE" data-confirm="Delete this backup?">Delete</button>'
-            f"</td></tr>"
-            for b in backups
-        ) or '<tr><td colspan="4">No backups yet</td></tr>'
-        return (f"<h1>Backups ({len(backups)})</h1>"
-                '<p><button data-action="/api/admin/backups">Create backup now</button>'
-                " — automatic nightly at 02:30, newest 7 kept.</p>"
-                '<table class="data-table"><thead><tr><th>File</th><th>Size</th>'
-                "<th>Created</th><th></th></tr></thead>"
-                f"<tbody>{rows}</tbody></table>"
-                f"{_action_script(self._ctx.csp_nonce)}")
-
-
-_REDIRECT_FORM_SCRIPT = """
-<script nonce="__NONCE__">
-const rForm = document.getElementById('redirect-form');
-rForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const message = rForm.querySelector('.form-message');
-  const res = await fetch('/api/admin/redirects', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
-    body: JSON.stringify({
-      from_path: rForm.elements['from_path'].value,
-      to_path: rForm.elements['to_path'].value,
-      status_code: parseInt(rForm.elements['status_code'].value, 10),
-    }),
-  });
-  const result = await res.json();
-  if (result.success) { window.location.reload(); }
-  else { message.textContent = result.error?.message || 'Save failed'; }
-});
-</script>
-"""
-
-
-class RedirectManagementPage(AdminPage):
-    """301/302 rules — slug renames create them automatically (event bus)."""
-
-    def __init__(self, ctx: PageContext, redirects: "RedirectService") -> None:
-        super().__init__(ctx)
-        self._redirects = redirects
-
-    @property
-    def title(self) -> str:
-        return "Redirects"
-
-    def build_content(self) -> str:
-        page = self.query_int("page")
-        result = self._redirects.list_redirects(PageRequest.create(page=page, size=50))
-        rows = "".join(
-            f"<tr><td>{esc(r.from_path)}</td><td>{esc(r.to_path)}</td>"
-            f"<td>{esc(r.status_code)}</td><td>{esc(r.hits)}</td>"
-            f"<td>{'yes' if r.is_active else 'no'}</td>"
-            f'<td><button data-action="/api/admin/redirects/{esc(r.id)}"'
-            f' data-method="DELETE" data-confirm="Delete this redirect?">Delete</button>'
-            f"</td></tr>"
-            for r in result.items
-        ) or '<tr><td colspan="6">No redirects</td></tr>'
-        nonce = esc(self._ctx.csp_nonce)
-        form_script = _REDIRECT_FORM_SCRIPT.replace("__NONCE__", nonce)
-        return (f"<h1>Redirects ({result.total})</h1>"
-                "<p>Renaming a content slug creates a 301 automatically.</p>"
-                '<form id="redirect-form" class="app-form">'
-                '<label>From path<input name="from_path" required placeholder="/old-page"></label>'
-                '<label>To path<input name="to_path" required placeholder="/new-page"></label>'
-                '<label>Status<input name="status_code" value="301" required'
-                ' pattern="30[12]"></label>'
-                '<button type="submit">Add redirect</button>'
-                '<div class="form-message" role="alert"></div></form>'
-                '<table class="data-table"><thead><tr><th>From</th><th>To</th>'
-                "<th>Code</th><th>Hits</th><th>Active</th><th></th></tr></thead>"
-                f"<tbody>{rows}</tbody></table>"
-                f"{PaginationComponent(result.page, result.pages, '/admin/redirects').render()}"
-                f"{form_script}{_action_script(self._ctx.csp_nonce)}")
 
 
 class DbConnectionManagementPage(AdminPage):

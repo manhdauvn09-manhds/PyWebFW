@@ -9,18 +9,14 @@ SPA/automation clients use the `Authorization: Bearer` header instead.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 
-from pywebfw.core.csv_export import CsvExporter
 from pywebfw.core.exceptions import ConflictError, NotFoundError, SchedulerError
 from pywebfw.core.pagination import PageRequest
 from pywebfw.core.routing import BaseApiController
-from pywebfw.domain.models import AuditLog, Redirect
 from pywebfw.scheduler.engine import SchedulerEngine
 from pywebfw.domain.models import ContentItem, DbConnectionProfile, MenuArea, MenuItem, Role
-from pywebfw.services.redirect_service import RedirectService
 from pywebfw.infrastructure.auth.manager import (
     ADMIN_TOKEN_COOKIE,
     BaseAuthHandler,
@@ -29,11 +25,9 @@ from pywebfw.infrastructure.auth.manager import (
 )
 from pywebfw.repositories.log_repository import LogRepository
 from pywebfw.services.auth_service import AuthService
-from pywebfw.services.backup_service import BackupService
 from pywebfw.services.contact_service import ContactService
 from pywebfw.services.content_service import ContentService
 from pywebfw.services.dashboard_service import DashboardService
-from pywebfw.services.media_service import MediaService
 from pywebfw.services.menu_service import MenuService
 from pywebfw.services.site_settings_service import SiteSettingsService
 from pywebfw.services.system_service import SystemService
@@ -44,18 +38,6 @@ from pywebfw.services.user_service import UserInput, UserService
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=128)
-    otp: str | None = Field(None, max_length=10)   # required when 2FA enabled
-
-
-class OtpRequest(BaseModel):
-    otp: str = Field(min_length=6, max_length=10)
-
-
-class RedirectRequest(BaseModel):
-    from_path: str = Field(min_length=2, max_length=300, pattern=r"^/.*")
-    to_path: str = Field(min_length=1, max_length=300, pattern=r"^/.*")
-    status_code: int = Field(301)
-    is_active: bool = True
 
 
 class ChangePasswordRequest(BaseModel):
@@ -143,26 +125,9 @@ class AdminAuthApiController(AdminApiController):
     def _register(self, router: APIRouter) -> None:
         @router.post("/login")
         def login(payload: LoginRequest, response: Response) -> dict:
-            result = self._auth_service.login(payload.username, payload.password,
-                                              otp=payload.otp)
+            result = self._auth_service.login(payload.username, payload.password)
             self._set_session_cookie(response, result.token)
             return self.ok({"token": result.token, "user": result.user.to_public_dict()})
-
-        @router.post("/2fa/setup")
-        def setup_2fa(user: CurrentUser = Depends(self._guard)) -> dict:
-            return self.ok(self._auth_service.setup_totp(user.id))
-
-        @router.post("/2fa/enable")
-        def enable_2fa(payload: OtpRequest,
-                       user: CurrentUser = Depends(self._guard)) -> dict:
-            self._auth_service.enable_totp(user.id, payload.otp)
-            return self.ok({"totp_enabled": True})
-
-        @router.post("/2fa/disable")
-        def disable_2fa(payload: OtpRequest,
-                        user: CurrentUser = Depends(self._guard)) -> dict:
-            self._auth_service.disable_totp(user.id, payload.otp)
-            return self.ok({"totp_enabled": False})
 
         @router.post("/change-password")
         def change_password(payload: ChangePasswordRequest, response: Response,
@@ -208,15 +173,6 @@ class AdminUserApiController(AdminApiController):
             result = self._users.list_users(PageRequest.create(page, size, sort_by, sort_desc))
             return self.paginated(result, lambda u: u.to_public_dict())
 
-        # NOTE: registered before /{user_id} so "export" is not parsed as an id.
-        @router.get("/export")
-        def export_users(user: CurrentUser = Depends(self._guard)) -> Response:
-            rows = self._users.export_all(actor=self._actor_name(user))
-            return CsvExporter.response(
-                "users.csv", rows,
-                ["id", "username", "email", "role", "is_active",
-                 "totp_enabled", "created_at"])
-
         @router.get("/{user_id}")
         def get_user(user_id: int, user: CurrentUser = Depends(self._guard)) -> dict:
             return self.ok(self._users.get(user_id).to_public_dict())
@@ -237,13 +193,6 @@ class AdminUserApiController(AdminApiController):
         def delete_user(user_id: int, user: CurrentUser = Depends(self._guard)) -> dict:
             self._users.delete(user_id, actor=self._actor_name(user))
             return self.ok({"deleted": user_id})
-
-        @router.post("/{user_id}/revoke-sessions")
-        def revoke_sessions(user_id: int,
-                            user: CurrentUser = Depends(self._guard)) -> dict:
-            revoked = self._users.revoke_sessions(user_id,
-                                                  actor=self._actor_name(user))
-            return self.ok({"revoked": revoked.username})
 
     @staticmethod
     def _to_input(payload: UserRequest) -> UserInput:
@@ -342,13 +291,6 @@ class AdminContactApiController(AdminApiController):
                                                  unread_only=unread_only)
             return self.paginated(result, lambda m: m.to_dict())
 
-        @router.get("/export")
-        def export_messages(user: CurrentUser = Depends(self._guard)) -> Response:
-            rows = self._contact.export_all(actor=self._actor_name(user))
-            return CsvExporter.response(
-                "messages.csv", rows,
-                ["id", "created_at", "name", "email", "subject", "message", "is_read"])
-
         @router.post("/{message_id}/read")
         def mark_read(message_id: int, user: CurrentUser = Depends(self._guard)) -> dict:
             entry = self._contact.mark_read(message_id, actor=self._actor_name(user))
@@ -359,92 +301,6 @@ class AdminContactApiController(AdminApiController):
                            user: CurrentUser = Depends(self._guard)) -> dict:
             self._contact.delete(message_id, actor=self._actor_name(user))
             return self.ok({"deleted": message_id})
-
-
-class AdminMediaApiController(AdminApiController):
-    prefix = "/api/admin/media"
-
-    def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
-                 media: MediaService) -> None:
-        super().__init__(auth_handler, auth_service)
-        self._media = media
-
-    def _register(self, router: APIRouter) -> None:
-        @router.get("")
-        def list_files(user: CurrentUser = Depends(self._guard)) -> dict:
-            return self.ok(self._media.list_files())
-
-        @router.post("", status_code=201)
-        async def upload(file: UploadFile = File(...),
-                         user: CurrentUser = Depends(self._guard)) -> dict:
-            data = await file.read()
-            stored = self._media.save_upload(file.filename or "unnamed", data,
-                                             actor=self._actor_name(user))
-            return self.ok(stored)
-
-        @router.delete("/{name}")
-        def delete_file(name: str, user: CurrentUser = Depends(self._guard)) -> dict:
-            self._media.delete(name, actor=self._actor_name(user))
-            return self.ok({"deleted": name})
-
-
-class AdminRedirectApiController(AdminApiController):
-    prefix = "/api/admin/redirects"
-
-    def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
-                 redirects: RedirectService) -> None:
-        super().__init__(auth_handler, auth_service)
-        self._redirects = redirects
-
-    def _register(self, router: APIRouter) -> None:
-        @router.get("")
-        def list_redirects(page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=100),
-                           user: CurrentUser = Depends(self._guard)) -> dict:
-            result = self._redirects.list_redirects(PageRequest.create(page, size))
-            return self.paginated(result, lambda r: r.to_dict())
-
-        @router.post("", status_code=201)
-        def create_redirect(payload: RedirectRequest,
-                            user: CurrentUser = Depends(self._guard)) -> dict:
-            redirect = Redirect(**payload.model_dump())
-            created = self._redirects.create(redirect, actor=self._actor_name(user))
-            return self.ok(created.to_dict())
-
-        @router.delete("/{redirect_id}")
-        def delete_redirect(redirect_id: int,
-                            user: CurrentUser = Depends(self._guard)) -> dict:
-            self._redirects.delete(redirect_id, actor=self._actor_name(user))
-            return self.ok({"deleted": redirect_id})
-
-
-class AdminBackupApiController(AdminApiController):
-    prefix = "/api/admin/backups"
-
-    def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
-                 backups: BackupService) -> None:
-        super().__init__(auth_handler, auth_service)
-        self._backups = backups
-
-    def _register(self, router: APIRouter) -> None:
-        @router.get("")
-        def list_backups(user: CurrentUser = Depends(self._guard)) -> dict:
-            return self.ok({"supported": self._backups.supported,
-                            "backups": self._backups.list_backups()})
-
-        @router.post("", status_code=201)
-        def create_backup(user: CurrentUser = Depends(self._guard)) -> dict:
-            return self.ok(self._backups.create(actor=self._actor_name(user)))
-
-        @router.get("/{name}/download")
-        def download(name: str, user: CurrentUser = Depends(self._guard)) -> FileResponse:
-            path = self._backups.path_for(name)
-            return FileResponse(path, filename=name,
-                                media_type="application/octet-stream")
-
-        @router.delete("/{name}")
-        def delete_backup(name: str, user: CurrentUser = Depends(self._guard)) -> dict:
-            self._backups.delete(name, actor=self._actor_name(user))
-            return self.ok({"deleted": name})
 
 
 class AdminLogApiController(AdminApiController):
@@ -466,16 +322,6 @@ class AdminLogApiController(AdminApiController):
             where, params = ("level = ?", (level,)) if level else (None, ())
             result = self._logs.list_page(PageRequest.create(page, size), where, params)
             return self.paginated(result, lambda log: log.to_dict())
-
-        @router.get("/export")
-        def export_logs(user: CurrentUser = Depends(self._guard)) -> Response:
-            self._logs.add(AuditLog(actor=self._actor_name(user),
-                                    action="logs.exported"))
-            rows = [log.to_dict() for log in self._logs.list_all()]
-            return CsvExporter.response(
-                "audit-logs.csv", rows,
-                ["id", "created_at", "actor", "action", "target", "detail", "level"])
-
 
 class AdminDashboardApiController(AdminApiController):
     prefix = "/api/admin/dashboard"

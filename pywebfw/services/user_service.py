@@ -1,4 +1,5 @@
-"""User management: CRUD with business validation + audit trail."""
+"""User management: CRUD with business validation + audit trail.
+(Bulk CSV export and the Session Manager ship with Pro.)"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -56,11 +57,6 @@ class UserService(BaseService, AuditMixin):
     def list_users(self, page: PageRequest) -> PageResult[User]:
         return self._users.list_page(page)
 
-    def export_all(self, actor: str) -> list[dict]:
-        """Export is a sensitive bulk read — always audited."""
-        self._audit(actor, "users.exported")
-        return [u.to_public_dict() for u in self._users.list_all()]
-
     def get(self, user_id: int) -> User:
         return self._users.get_by_id(user_id)
 
@@ -97,16 +93,6 @@ class UserService(BaseService, AuditMixin):
         with UnitOfWork(self._db):
             self._users.update(user)
             self._audit(actor, "user.updated", target=user.username)
-        return user
-
-    def revoke_sessions(self, user_id: int, actor: str) -> User:
-        """Admin action: invalidates every outstanding token of the user."""
-        user = self._users.get_by_id(user_id)
-        user.revoke_tokens()
-        with UnitOfWork(self._db):
-            self._users.update(user)
-            self._audit(actor, "user.sessions_revoked", target=user.username,
-                        level="warning")
         return user
 
     def delete(self, user_id: int, actor: str) -> None:

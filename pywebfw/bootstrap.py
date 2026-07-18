@@ -1,4 +1,4 @@
-"""Composition root.
+"""Composition root (Community Edition).
 
 `ApplicationBuilder` is the ONLY place that knows concrete wiring:
 settings -> container registrations -> schema -> controllers -> middleware ->
@@ -7,6 +7,9 @@ scheduler -> FastAPI app. Every other layer depends on abstractions.
 Applications extend the framework by passing `AppModule` plugins — each hook
 (services, schema, controllers, jobs, events) runs at the matching startup
 phase, so projects never edit framework code.
+
+PostgreSQL/Redis backends, traffic analytics, backups, redirects, media,
+sessions, 2FA and CSV export are part of PyWebFW Pro.
 """
 from __future__ import annotations
 
@@ -16,20 +19,16 @@ from typing import AsyncIterator, Sequence
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from starlette.middleware.cors import CORSMiddleware
 
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from pywebfw.api.admin_api import (
     AdminAuthApiController,
-    AdminBackupApiController,
     AdminContactApiController,
-    AdminRedirectApiController,
     AdminContentApiController,
     AdminDashboardApiController,
     AdminLogApiController,
-    AdminMediaApiController,
     AdminMenuApiController,
     AdminSettingsApiController,
     AdminSystemApiController,
@@ -45,57 +44,48 @@ from pywebfw.config.settings import (
 )
 from pywebfw.core.container import ServiceContainer
 from pywebfw.core.events import DomainEvent, EventBus
-from pywebfw.core.exceptions import AuthenticationError, FrameworkError, NotFoundError
+from pywebfw.core.exceptions import (
+    AuthenticationError,
+    ConfigurationError,
+    FrameworkError,
+)
 from pywebfw.core.logging import LoggerFactory
 from pywebfw.core.middleware import (
     MaintenanceMiddleware,
     RateLimitMiddleware,
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
-    TrafficTrackingMiddleware,
 )
 from pywebfw.core.responses import ApiResponse
 from pywebfw.core.routing import BaseController
-from pywebfw.core.security import (
-    PasswordHasher,
-    SlidingWindowRateLimiter,
-    TokenManager,
-    TotpProvider,
-)
+from pywebfw.core.security import PasswordHasher, SlidingWindowRateLimiter, TokenManager
 from pywebfw.infrastructure.auth.manager import BaseAuthHandler, TokenAuthHandler
 from pywebfw.infrastructure.cache.manager import BaseCacheManager, InMemoryCacheManager
 from pywebfw.infrastructure.database.manager import BaseDatabaseManager, SQLiteDatabaseManager
 from pywebfw.infrastructure.database.schema import SchemaInitializer
 from pywebfw.infrastructure.mail.mailer import BaseMailer, NullMailer, SmtpMailer
-from pywebfw.infrastructure.media.storage import BaseMediaStorage, LocalMediaStorage
 from pywebfw.repositories.contact_repository import ContactRepository
 from pywebfw.repositories.content_repository import ContentRepository
 from pywebfw.repositories.db_connection_repository import DbConnectionRepository
 from pywebfw.repositories.log_repository import LogRepository
 from pywebfw.repositories.menu_repository import MenuRepository
-from pywebfw.repositories.redirect_repository import RedirectRepository
 from pywebfw.repositories.setting_repository import SettingRepository
-from pywebfw.repositories.traffic_repository import TrafficRepository
 from pywebfw.repositories.user_repository import UserRepository
 from pywebfw.scheduler.engine import JobRegistry, SchedulerEngine
 from pywebfw.scheduler.jobs import (
     CacheWarmupJob,
-    DatabaseBackupJob,
     DatabaseHealthCheckJob,
     DatabaseOptimizeJob,
     IdleConnectionCloserJob,
     LogCleanupJob,
     ServerHealthCheckJob,
-    TrafficFlushJob,
 )
+from pywebfw.plugins import AppModule
 from pywebfw.services.auth_service import AuthService
-from pywebfw.services.backup_service import BackupService
 from pywebfw.services.contact_service import ContactService
 from pywebfw.services.content_service import ContentService
 from pywebfw.services.dashboard_service import DashboardService
-from pywebfw.services.media_service import MediaService
 from pywebfw.services.menu_service import MenuService
-from pywebfw.services.redirect_service import RedirectService
 from pywebfw.services.search_service import SearchService
 from pywebfw.services.site_settings_service import SiteSettingsService
 from pywebfw.services.system_service import (
@@ -103,17 +93,17 @@ from pywebfw.services.system_service import (
     ServerHealthChecker,
     SystemService,
 )
-from pywebfw.plugins import AppModule
-from pywebfw.services.traffic_service import TrafficService
 from pywebfw.services.user_service import UserService
 from pywebfw.web.controllers import (
     AdminWebController,
     AdminWebDeps,
     DynamicContentController,
-    MediaWebController,
     PublicWebController,
 )
 from pywebfw.web.error_pages import render_error_page
+
+_PRO_HINT = ("is available in PyWebFW Pro — "
+             "see https://github.com/manhdauvn09-manhds/PyWebFW")
 
 
 class ApplicationBuilder:
@@ -163,10 +153,6 @@ class ApplicationBuilder:
                 f"From: {payload['name']} <{payload['email']}>\n\n{payload['message']}",
             )
 
-        def redirect_renamed_content(event: DomainEvent) -> None:
-            c.resolve(RedirectService).auto_create(
-                event.payload["old_path"], event.payload["new_path"], actor="system")
-
         def alert_failed_job(event: DomainEvent) -> None:
             if not settings.mail.admin_email:
                 return
@@ -179,7 +165,6 @@ class ApplicationBuilder:
             )
 
         bus.subscribe("contact.submitted", notify_admin_of_contact)
-        bus.subscribe("content.slug_changed", redirect_renamed_content)
         bus.subscribe("job.failed", alert_failed_job)
         for plugin in self._plugins:
             plugin.subscribe_events(bus, c)
@@ -194,35 +179,31 @@ class ApplicationBuilder:
         c.register_instance(PasswordHasher, PasswordHasher(settings.security.password_iterations))
         c.register_instance(TokenManager, TokenManager(
             settings.security.secret_key, settings.security.token_ttl_seconds))
-        c.register_instance(TotpProvider, TotpProvider(issuer=settings.name))
         c.register_instance(EventBus, EventBus())
         c.register_singleton(BaseAuthHandler, lambda c: TokenAuthHandler(
             c.resolve(TokenManager), c.resolve(UserRepository)))
         c.register_singleton(BaseMailer, lambda c: (
             SmtpMailer(settings.mail) if settings.mail.host else NullMailer()))
-        c.register_singleton(BaseMediaStorage, lambda c: LocalMediaStorage(
-            settings.media.dir))
 
     def _build_database(self) -> BaseDatabaseManager:
         db = self._settings.database
-        if db.driver == "postgres":
-            from pywebfw.infrastructure.database.manager import PostgresDatabaseManager
-            return PostgresDatabaseManager(db.dsn, db.pool_size, LoggerFactory.get("db"))
+        if db.driver != "sqlite":
+            raise ConfigurationError(
+                f"The '{db.driver}' database backend {_PRO_HINT}")
         return SQLiteDatabaseManager(db.path, db.pool_size, LoggerFactory.get("db"))
 
     def _build_cache(self) -> BaseCacheManager:
         cache = self._settings.cache
-        if cache.backend == "redis":
-            from pywebfw.infrastructure.cache.manager import RedisCacheManager
-            return RedisCacheManager(cache.redis_url, cache.default_ttl_seconds)
+        if cache.backend != "memory":
+            raise ConfigurationError(
+                f"The '{cache.backend}' cache backend {_PRO_HINT}")
         return InMemoryCacheManager(cache.default_ttl_seconds)
 
     def _register_repositories(self) -> None:
         c = self._container
         for repo_type in (UserRepository, MenuRepository, LogRepository,
                           ContentRepository, DbConnectionRepository,
-                          SettingRepository, TrafficRepository,
-                          ContactRepository, RedirectRepository):
+                          SettingRepository, ContactRepository):
             c.register_singleton(
                 repo_type,
                 lambda c, rt=repo_type: rt(c.resolve(BaseDatabaseManager)))
@@ -231,8 +212,7 @@ class ApplicationBuilder:
         c = self._container
         c.register_singleton(AuthService, lambda c: AuthService(
             c.resolve(UserRepository), c.resolve(LogRepository),
-            c.resolve(PasswordHasher), c.resolve(TokenManager),
-            c.resolve(TotpProvider)))
+            c.resolve(PasswordHasher), c.resolve(TokenManager)))
         c.register_singleton(UserService, lambda c: UserService(
             c.resolve(BaseDatabaseManager), c.resolve(UserRepository),
             c.resolve(LogRepository), c.resolve(PasswordHasher)))
@@ -241,29 +221,18 @@ class ApplicationBuilder:
         c.register_singleton(ContentService, lambda c: ContentService(
             c.resolve(ContentRepository), c.resolve(BaseCacheManager),
             c.resolve(LogRepository), c.resolve(EventBus)))
-        c.register_singleton(RedirectService, lambda c: RedirectService(
-            c.resolve(RedirectRepository), c.resolve(BaseCacheManager),
-            c.resolve(LogRepository)))
         c.register_singleton(SearchService, lambda c: SearchService(
             c.resolve(ContentRepository)))
-        c.register_singleton(TrafficService, lambda c: TrafficService(
-            c.resolve(TrafficRepository)))
         c.register_singleton(ContactService, lambda c: ContactService(
             c.resolve(ContactRepository), c.resolve(LogRepository),
             c.resolve(EventBus)))
-        c.register_singleton(MediaService, lambda c: MediaService(
-            c.resolve(BaseMediaStorage), c.resolve(LogRepository),
-            max_upload_mb=self._settings.media.max_upload_mb))
-        c.register_singleton(BackupService, lambda c: BackupService(
-            c.resolve(BaseDatabaseManager), self._settings.database.path,
-            c.resolve(LogRepository)))
         c.register_singleton(SiteSettingsService, lambda c: SiteSettingsService(
             c.resolve(SettingRepository), c.resolve(BaseCacheManager),
             c.resolve(LogRepository)))
         c.register_singleton(DashboardService, lambda c: DashboardService(
             c.resolve(BaseDatabaseManager), c.resolve(UserRepository),
             c.resolve(LogRepository), c.resolve(ContentRepository),
-            c.resolve(BaseCacheManager), c.resolve(TrafficService)))
+            c.resolve(BaseCacheManager)))
         c.register_instance(ServerHealthChecker, ServerHealthChecker(started_at=time.time()))
         c.register_singleton(SystemService, lambda c: SystemService(
             c.resolve(DbConnectionRepository), c.resolve(LogRepository),
@@ -295,9 +264,7 @@ class ApplicationBuilder:
         registry.register(DatabaseHealthCheckJob(db))
         registry.register(LogCleanupJob(c.resolve(LogRepository)))
         registry.register(CacheWarmupJob(c.resolve(MenuService), cache))
-        registry.register(TrafficFlushJob(c.resolve(TrafficService)))
         registry.register(DatabaseOptimizeJob(db))
-        registry.register(DatabaseBackupJob(c.resolve(BackupService)))
         registry.register(IdleConnectionCloserJob(
             db, self._settings.database.idle_timeout_seconds))
         for plugin in self._plugins:
@@ -327,36 +294,18 @@ class ApplicationBuilder:
         rl = self._settings.rate_limit
         limiter = SlidingWindowRateLimiter(rl.max_requests, rl.window_seconds)
         login_limiter = SlidingWindowRateLimiter(rl.login_max_requests, rl.login_window_seconds)
-        # add_middleware: last added = outermost. Traffic is innermost so it
-        # never counts rate-limited or maintenance responses.
-        app.add_middleware(TrafficTrackingMiddleware,
-                           traffic=self._container.resolve(TrafficService))
         app.add_middleware(MaintenanceMiddleware,
                            site_settings=self._container.resolve(SiteSettingsService))
         app.add_middleware(RequestLoggingMiddleware)
         app.add_middleware(RateLimitMiddleware, limiter=limiter, login_limiter=login_limiter)
         app.add_middleware(SecurityHeadersMiddleware)
-        app.add_middleware(CORSMiddleware, allow_origins=["localhost", "127.0.0.1"],
-                           allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE"],
-                           allow_headers=["Content-Type", "Authorization"])
 
     def _register_error_handlers(self, app: FastAPI) -> None:
-        redirects = self._container.resolve(RedirectService)
-
         def _nonce(request: Request) -> str:
             return getattr(request.state, "csp_nonce", "")
 
         def _is_api(request: Request) -> bool:
             return request.url.path.startswith("/api/")
-
-        def _maybe_redirect(request: Request) -> RedirectResponse | None:
-            """Before showing a web 404, check the redirect rules (lookups
-            only happen on the 404 path — zero cost for normal requests)."""
-            match = redirects.resolve(request.url.path)
-            if match is None:
-                return None
-            to_path, status_code = match
-            return RedirectResponse(to_path, status_code=status_code)
 
         async def framework_error_handler(request: Request, exc: FrameworkError):
             if _is_api(request):
@@ -366,10 +315,6 @@ class ApplicationBuilder:
                 )
             if isinstance(exc, AuthenticationError) and request.url.path.startswith("/admin"):
                 return RedirectResponse("/admin/login", status_code=303)
-            if isinstance(exc, NotFoundError):
-                redirect = _maybe_redirect(request)
-                if redirect is not None:
-                    return redirect
             return HTMLResponse(
                 render_error_page(exc.status_code, exc.message, nonce=_nonce(request)),
                 status_code=exc.status_code,
@@ -383,10 +328,6 @@ class ApplicationBuilder:
                     status_code=exc.status_code,
                     content=ApiResponse.fail("HTTP_ERROR", str(exc.detail)).to_dict(),
                 )
-            if exc.status_code == 404:
-                redirect = _maybe_redirect(request)
-                if redirect is not None:
-                    return redirect
             return HTMLResponse(
                 render_error_page(exc.status_code, nonce=_nonce(request)),
                 status_code=exc.status_code,
@@ -434,9 +375,6 @@ class ApplicationBuilder:
                 contents=c.resolve(ContentService),
                 site_settings=c.resolve(SiteSettingsService),
                 contact=c.resolve(ContactService),
-                media=c.resolve(MediaService),
-                backups=c.resolve(BackupService),
-                redirects=c.resolve(RedirectService),
                 engine=engine,
             )
             controllers += [
@@ -449,12 +387,6 @@ class ApplicationBuilder:
                                           c.resolve(ContentService)),
                 AdminContactApiController(auth_handler, auth_service,
                                           c.resolve(ContactService)),
-                AdminRedirectApiController(auth_handler, auth_service,
-                                           c.resolve(RedirectService)),
-                AdminMediaApiController(auth_handler, auth_service,
-                                        c.resolve(MediaService)),
-                AdminBackupApiController(auth_handler, auth_service,
-                                         c.resolve(BackupService)),
                 AdminLogApiController(auth_handler, auth_service, c.resolve(LogRepository)),
                 AdminDashboardApiController(auth_handler, auth_service,
                                             c.resolve(DashboardService)),
@@ -463,11 +395,6 @@ class ApplicationBuilder:
                 AdminSystemApiController(auth_handler, auth_service,
                                          c.resolve(SystemService), engine),
             ]
-
-        # Media files are served wherever a web surface exists (content images
-        # on the public site, previews in the admin area).
-        if settings.has_module(MODULE_PUBLIC) or settings.has_module(MODULE_ADMIN):
-            controllers.append(MediaWebController(c.resolve(MediaService)))
 
         # Plugin controllers mount after the built-ins...
         for plugin in self._plugins:

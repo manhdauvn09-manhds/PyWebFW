@@ -1,11 +1,11 @@
 """Authentication flows: credential check -> signed token. Failed and
-successful logins both leave an audit trail."""
+successful logins both leave an audit trail. (2FA TOTP ships with Pro.)"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from pywebfw.core.exceptions import AuthenticationError, ValidationFailedError
-from pywebfw.core.security import PasswordHasher, TokenManager, TotpProvider
+from pywebfw.core.security import PasswordHasher, TokenManager
 from pywebfw.domain.models import User
 from pywebfw.repositories.log_repository import LogRepository
 from pywebfw.repositories.user_repository import UserRepository
@@ -25,63 +25,23 @@ class AuthService(BaseService, AuditMixin):
         logs: LogRepository,
         hasher: PasswordHasher,
         tokens: TokenManager,
-        totp: TotpProvider,
     ) -> None:
         super().__init__()
         self._users = users
         self._audit_repo = logs
         self._hasher = hasher
         self._tokens = tokens
-        self._totp = totp
 
-    def login(self, username: str, password: str, otp: str | None = None) -> LoginResult:
+    def login(self, username: str, password: str) -> LoginResult:
         user = self._users.find_by_username(username.strip())
         # Same error for unknown user / wrong password — no user enumeration.
         if user is None or not user.is_active or not self._hasher.verify(password, user.password_hash):
             self._audit("anonymous", "login.failed", target=username, level="warning")
             self._logger.warning("login failed", username=username)
             raise AuthenticationError("Invalid username or password")
-        if user.totp_enabled:
-            if not otp:
-                # The password was right — tell the client to ask for the code.
-                raise AuthenticationError("One-time code required",
-                                          details={"reason": "otp_required"})
-            if not self._totp.verify(user.totp_secret, otp):
-                self._audit(user.username, "login.otp_failed", level="warning")
-                raise AuthenticationError("Invalid one-time code")
         token = self._issue_for(user)
         self._audit(user.username, "login.success")
         return LoginResult(token=token, user=user)
-
-    # --- two-factor authentication -----------------------------------------------
-    def setup_totp(self, user_id: int) -> dict[str, str]:
-        """Generates and stores a new secret (not yet enabled); the user
-        confirms with a valid code via enable_totp."""
-        user = self._users.get_by_id(user_id)
-        secret = TotpProvider.generate_secret()
-        user.totp_secret = secret
-        user.totp_enabled = False
-        self._users.update(user)
-        self._audit(user.username, "auth.2fa_setup_started")
-        return {"secret": secret,
-                "otpauth_uri": self._totp.provisioning_uri(secret, user.username)}
-
-    def enable_totp(self, user_id: int, otp: str) -> None:
-        user = self._users.get_by_id(user_id)
-        if not user.totp_secret or not self._totp.verify(user.totp_secret, otp):
-            raise AuthenticationError("Invalid one-time code")
-        user.totp_enabled = True
-        self._users.update(user)
-        self._audit(user.username, "auth.2fa_enabled")
-
-    def disable_totp(self, user_id: int, otp: str) -> None:
-        user = self._users.get_by_id(user_id)
-        if not user.totp_enabled or not self._totp.verify(user.totp_secret, otp):
-            raise AuthenticationError("Invalid one-time code")
-        user.totp_secret = ""
-        user.totp_enabled = False
-        self._users.update(user)
-        self._audit(user.username, "auth.2fa_disabled", level="warning")
 
     def change_password(self, user_id: int, current_password: str,
                         new_password: str) -> LoginResult:

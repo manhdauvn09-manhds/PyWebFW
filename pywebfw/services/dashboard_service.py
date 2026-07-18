@@ -1,4 +1,5 @@
-"""Aggregated metrics for the admin dashboard."""
+"""Aggregated metrics for the admin dashboard.
+(Traffic analytics — online visitors, view charts — ships with Pro.)"""
 from __future__ import annotations
 
 from typing import Any
@@ -10,7 +11,6 @@ from pywebfw.repositories.content_repository import ContentRepository
 from pywebfw.repositories.log_repository import LogRepository
 from pywebfw.repositories.user_repository import UserRepository
 from pywebfw.services.base import BaseService
-from pywebfw.services.traffic_service import TrafficService
 
 
 class DashboardService(BaseService):
@@ -21,7 +21,6 @@ class DashboardService(BaseService):
         logs: LogRepository,
         contents: ContentRepository,
         cache: BaseCacheManager,
-        traffic: TrafficService,
     ) -> None:
         super().__init__()
         self._db = db
@@ -29,7 +28,6 @@ class DashboardService(BaseService):
         self._logs = logs
         self._contents = contents
         self._cache = cache
-        self._traffic = traffic
 
     def metrics(self) -> dict[str, Any]:
         recent = self._logs.list_page(PageRequest.create(page=1, size=8))
@@ -44,5 +42,4 @@ class DashboardService(BaseService):
             "recent_logs": [log.to_dict() for log in recent.items],
             "database": self._db.health_check(),
             "cache": self._cache.stats(),
-            "traffic": self._traffic.dashboard_stats(),
         }

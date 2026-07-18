@@ -2,6 +2,7 @@
 
 Stdlib only (hashlib/hmac) — no weak homemade crypto: PBKDF2-HMAC-SHA256 with
 per-password random salt, constant-time comparison, HMAC-signed expiring tokens.
+(TOTP two-factor authentication ships with PyWebFW Pro.)
 """
 from __future__ import annotations
 
@@ -10,7 +11,6 @@ import hashlib
 import hmac
 import json
 import secrets
-import struct
 import threading
 import time
 from dataclasses import dataclass
@@ -87,48 +87,6 @@ class TokenManager:
 
     def _sign(self, body: bytes) -> str:
         return hmac.new(self._key, body, hashlib.sha256).hexdigest()
-
-
-class TotpProvider:
-    """RFC 6238 time-based one-time passwords (SHA1, 6 digits, 30s period) —
-    compatible with Google Authenticator / Authy / 1Password. Stdlib only."""
-
-    PERIOD_SECONDS = 30
-    DIGITS = 6
-
-    def __init__(self, issuer: str = "PyWebFW") -> None:
-        self._issuer = issuer
-
-    @staticmethod
-    def generate_secret() -> str:
-        return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
-
-    def provisioning_uri(self, secret: str, account: str) -> str:
-        """otpauth:// URI for authenticator apps (renderable as a QR code)."""
-        return (f"otpauth://totp/{self._issuer}:{account}?secret={secret}"
-                f"&issuer={self._issuer}&algorithm=SHA1"
-                f"&digits={self.DIGITS}&period={self.PERIOD_SECONDS}")
-
-    def _code_at(self, secret: str, counter: int) -> str:
-        key = base64.b32decode(secret + "=" * (-len(secret) % 8))
-        digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
-        offset = digest[-1] & 0x0F
-        value = (int.from_bytes(digest[offset:offset + 4], "big") & 0x7FFFFFFF)
-        return f"{value % 10 ** self.DIGITS:0{self.DIGITS}d}"
-
-    def current_code(self, secret: str, at: float | None = None) -> str:
-        counter = int((at if at is not None else time.time()) // self.PERIOD_SECONDS)
-        return self._code_at(secret, counter)
-
-    def verify(self, secret: str, code: str, window: int = 1) -> bool:
-        """Accepts the current period ±`window` (clock-drift tolerance)."""
-        if not secret or not code:
-            return False
-        counter = int(time.time() // self.PERIOD_SECONDS)
-        return any(
-            hmac.compare_digest(self._code_at(secret, counter + drift), code.strip())
-            for drift in range(-window, window + 1)
-        )
 
 
 class SlidingWindowRateLimiter:

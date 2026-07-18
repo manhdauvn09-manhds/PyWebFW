@@ -1,8 +1,8 @@
 """Caching layer.
 
 `BaseCacheManager` is the contract services use; `InMemoryCacheManager` is the
-default. A RedisCacheManager can implement the same ABC for multi-instance
-deployments without changing a single service.
+default. The Redis backend for multi-instance deployments ships with
+PyWebFW Pro — same ABC, zero service changes.
 """
 from __future__ import annotations
 
@@ -51,60 +51,6 @@ class BaseCacheManager(ABC):
         if value is not None:
             self.set(key, value, ttl_seconds)
         return value
-
-
-class RedisCacheManager(BaseCacheManager):
-    """Redis-backed cache for multi-instance deployments
-    (CACHE_BACKEND=redis + CACHE_REDIS_URL; `pip install redis`).
-    Values are pickled — the cache stores only framework-produced objects."""
-
-    def __init__(self, url: str, default_ttl_seconds: int = 120,
-                 prefix: str = "pywebfw:") -> None:
-        try:
-            import redis
-        except ImportError as exc:
-            from pywebfw.core.exceptions import ConfigurationError
-            raise ConfigurationError(
-                "CACHE_BACKEND=redis requires the redis package: pip install redis"
-            ) from exc
-        import pickle
-        self._pickle = pickle
-        self._client = redis.Redis.from_url(url)
-        self._default_ttl = default_ttl_seconds
-        self._prefix = prefix
-        self._hits = 0
-        self._misses = 0
-
-    def _key(self, key: str) -> str:
-        return f"{self._prefix}{key}"
-
-    def get(self, key: str) -> Any | None:
-        raw = self._client.get(self._key(key))
-        if raw is None:
-            self._misses += 1
-            return None
-        self._hits += 1
-        return self._pickle.loads(raw)
-
-    def set(self, key: str, value: Any, ttl_seconds: int | None = None) -> None:
-        ttl = ttl_seconds if ttl_seconds is not None else self._default_ttl
-        self._client.setex(self._key(key), ttl, self._pickle.dumps(value))
-
-    def delete(self, key: str) -> None:
-        self._client.delete(self._key(key))
-
-    def delete_prefix(self, prefix: str) -> int:
-        keys = list(self._client.scan_iter(match=f"{self._key(prefix)}*"))
-        if keys:
-            self._client.delete(*keys)
-        return len(keys)
-
-    def clear(self) -> None:
-        self.delete_prefix("")
-
-    def stats(self) -> dict[str, Any]:
-        return {"backend": "redis", "hits": self._hits, "misses": self._misses,
-                "entries": sum(1 for _ in self._client.scan_iter(match=f"{self._prefix}*"))}
 
 
 class InMemoryCacheManager(BaseCacheManager):

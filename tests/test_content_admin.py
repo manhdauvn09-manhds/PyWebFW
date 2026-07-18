@@ -1,11 +1,9 @@
 """Content Management (admin CMS) + database backup job."""
 from __future__ import annotations
 
-import asyncio
 
 from fastapi.testclient import TestClient
 
-from pywebfw.scheduler.base import JobStatus
 
 
 def test_content_crud_flow_end_to_end(client: TestClient, auth_headers: dict[str, str]) -> None:
@@ -64,13 +62,3 @@ def test_content_admin_page_renders_list_and_form(client: TestClient) -> None:
     edit_form = client.get("/admin/contents", params={"edit": "1"})
     assert 'data-content-id="1"' in edit_form.text   # populated edit form
     client.cookies.clear()
-
-
-def test_database_backup_job(client: TestClient) -> None:
-    engine = client.app.state.scheduler_engine
-    result = asyncio.run(engine.run_job_now("database-backup"))
-    assert result.status is JobStatus.SUCCESS, result.error
-    assert "backup" in result.message and "created" in result.message
-    # Idempotent: a second run creates another timestamped snapshot.
-    again = asyncio.run(engine.run_job_now("database-backup"))
-    assert again.status is JobStatus.SUCCESS

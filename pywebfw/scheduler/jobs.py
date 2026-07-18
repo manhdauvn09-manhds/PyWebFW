@@ -1,5 +1,6 @@
 """Built-in scheduled jobs. Each one is a small `BaseSchedulerJob` subclass —
-add new automation by writing another subclass and registering it in bootstrap.
+add new automation by writing another subclass and registering it via an
+AppModule plugin. (Automated backups and traffic flushing ship with Pro.)
 """
 from __future__ import annotations
 
@@ -15,10 +16,8 @@ from pywebfw.scheduler.base import (
     IntervalSchedule,
     RetryPolicy,
 )
-from pywebfw.services.backup_service import BackupService
 from pywebfw.services.menu_service import MenuService
 from pywebfw.services.system_service import ServerHealthChecker
-from pywebfw.services.traffic_service import TrafficService
 
 
 class ServerHealthCheckJob(BaseSchedulerJob):
@@ -71,8 +70,7 @@ class LogCleanupJob(BaseSchedulerJob):
 
 
 class CacheWarmupJob(BaseSchedulerJob):
-    """Cache refresh/warming: drops expired entries (in-memory backend only —
-    Redis expires keys itself), preloads hot data."""
+    """Cache refresh/warming: drops expired entries, preloads hot data."""
 
     name = "cache-warmup"
     schedule = IntervalSchedule(240)
@@ -102,43 +100,6 @@ class DatabaseOptimizeJob(BaseSchedulerJob):
     def run(self) -> str:
         report = self._db.optimize()
         return f"optimize finished in {report['duration_ms']}ms"
-
-
-class TrafficFlushJob(BaseSchedulerJob):
-    """Persists pending in-memory traffic counters. The middleware also
-    flushes opportunistically; this job guarantees a flush even on idle
-    processes (relevant for the all-in-one deployment)."""
-
-    name = "traffic-flush"
-    schedule = IntervalSchedule(60)
-
-    def __init__(self, traffic: "TrafficService") -> None:
-        super().__init__()
-        self._traffic = traffic
-
-    def run(self) -> str:
-        written = self._traffic.maybe_flush(force=True)
-        return f"flushed {written} traffic row(s)"
-
-
-class DatabaseBackupJob(BaseSchedulerJob):
-    """Nightly on-line database backup. The snapshot/rotation logic lives in
-    BackupService (shared with the admin Backup Manager screen)."""
-
-    name = "database-backup"
-    schedule = DailyTimeSchedule(hour=2, minute=30)
-    retry_policy = RetryPolicy(max_attempts=2, delay_seconds=5)
-
-    def __init__(self, backups: "BackupService") -> None:
-        super().__init__()
-        self._backups = backups
-
-    def run(self) -> str:
-        if not self._backups.supported:
-            return "skipped (non-sqlite engine: use pg_dump / managed backups)"
-        result = self._backups.create(actor="scheduler")
-        return (f"backup {result['name']} created, "
-                f"{result['rotated']} old backup(s) removed")
 
 
 class IdleConnectionCloserJob(BaseSchedulerJob):

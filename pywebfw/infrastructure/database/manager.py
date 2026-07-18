@@ -23,10 +23,8 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
-from pywebfw.core.exceptions import ConfigurationError, ConflictError, DatabaseError
+from pywebfw.core.exceptions import ConflictError, DatabaseError
 from pywebfw.core.logging import BaseLogger
-
-QUERY_TIMEOUT_SECONDS = 30  # Prevent long-running queries; PostgreSQL enforces via statement_timeout
 
 
 class PooledConnection:
@@ -302,63 +300,6 @@ class SQLiteDatabaseManager(PooledDatabaseManager):
         with self._pool.acquire() as conn:
             conn.raw.execute("ANALYZE")
             conn.raw.execute("PRAGMA optimize")
-            conn.raw.commit()
-        duration_ms = round((time.perf_counter() - started) * 1000, 2)
-        self._logger.info("database optimized", duration_ms=duration_ms)
-        return {"optimized": True, "duration_ms": duration_ms}
-
-
-class PostgresDatabaseManager(PooledDatabaseManager):
-    """PostgreSQL implementation over psycopg3 (`pip install psycopg[binary]`).
-
-    Reuses the framework ConnectionPool (and its idle-close policy) instead of
-    psycopg_pool, so behaviour stays identical across engines."""
-
-    def __init__(self, dsn: str, pool_size: int, logger: BaseLogger) -> None:
-        try:
-            import psycopg
-            from psycopg.rows import dict_row
-        except ImportError as exc:
-            raise ConfigurationError(
-                "DB_DRIVER=postgres requires psycopg: pip install 'psycopg[binary]'"
-            ) from exc
-        if not dsn:
-            raise ConfigurationError("DB_DRIVER=postgres requires DB_DSN")
-        self._psycopg = psycopg
-        self._row_factory = dict_row
-        self._dsn = dsn
-        super().__init__(pool_size, logger)
-
-    @property
-    def dialect(self) -> str:
-        return "postgres"
-
-    def _driver_error_types(self) -> tuple[type[BaseException], ...]:
-        return (self._psycopg.Error,)
-
-    def _integrity_error_types(self) -> tuple[type[BaseException], ...]:
-        return (self._psycopg.IntegrityError,)
-
-    def _create_connection(self):
-        return self._psycopg.connect(self._dsn, row_factory=self._row_factory)
-
-    def _translate(self, sql: str) -> str:
-        return sql.replace("?", "%s")
-
-    def _execute_write(self, conn: PooledConnection, sql: str,
-                       params: tuple, is_insert: bool) -> int:
-        if is_insert and "RETURNING" not in sql.upper():
-            sql += " RETURNING id"
-        cursor = conn.raw.execute(sql, params)
-        if is_insert:
-            row = cursor.fetchone()
-            return int(row["id"]) if row else 0
-        return cursor.rowcount
-
-    def optimize(self) -> dict[str, Any]:
-        started = time.perf_counter()
-        with self._pool.acquire() as conn:
-            conn.raw.execute("ANALYZE")
             conn.raw.commit()
         duration_ms = round((time.perf_counter() - started) * 1000, 2)
         self._logger.info("database optimized", duration_ms=duration_ms)
