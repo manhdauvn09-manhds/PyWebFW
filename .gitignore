@@ -6,3 +6,11 @@ __pycache__/
 dist/
 data/
 .env
+
+# Claude Code & harness internal files
+.claude/
+.harness/
+contracts/
+CLAUDE.md
+CLAUDE.harness.md
+tools/harness-bundle/
