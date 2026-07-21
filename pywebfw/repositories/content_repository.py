@@ -65,7 +65,9 @@ class ContentRepository(BaseRepository[ContentItem]):
 
     def list_published(self) -> list[ContentItem]:
         rows = self._db.fetch_all(
-            "SELECT * FROM contents WHERE is_published = 1 ORDER BY updated_at DESC")
+            "SELECT id, slug, title, summary, '' AS body, seo_title, seo_description,"
+            " is_published, created_at, updated_at"
+            " FROM contents WHERE is_published = 1 ORDER BY updated_at DESC")
         return [self._map_row(r) for r in rows]
 
     def search(self, term: str, page: PageRequest) -> PageResult[ContentItem]:

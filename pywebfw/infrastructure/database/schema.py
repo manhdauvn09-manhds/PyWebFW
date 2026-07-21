@@ -93,12 +93,46 @@ _TABLES: dict[str, str] = {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )""",
+    "redirects": """
+        CREATE TABLE IF NOT EXISTS redirects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_path TEXT NOT NULL UNIQUE,
+            to_path TEXT NOT NULL,
+            status_code INTEGER NOT NULL DEFAULT 301,
+            hits INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
+    "traffic_stats": """
+        CREATE TABLE IF NOT EXISTS traffic_stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day TEXT NOT NULL,
+            path TEXT NOT NULL,
+            hits INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(day, path)
+        )""",
+    "traffic_daily": """
+        CREATE TABLE IF NOT EXISTS traffic_daily (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            day TEXT NOT NULL UNIQUE,
+            uniques INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )""",
 }
 
 _INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_menus_area_pos ON menus(area, position)",
     "CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_level ON audit_logs(level)",
     "CREATE INDEX IF NOT EXISTS idx_contents_published ON contents(is_published, slug)",
+    "CREATE INDEX IF NOT EXISTS idx_redirects_from_path ON redirects(from_path) WHERE is_active = 1",
+    "CREATE INDEX IF NOT EXISTS idx_traffic_stats_day ON traffic_stats(day)",
+    "CREATE INDEX IF NOT EXISTS idx_traffic_daily_day ON traffic_daily(day)",
 ]
 
 # Columns added after the initial release: (table, column, DDL fragment).

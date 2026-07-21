@@ -44,21 +44,22 @@ class TrafficTracker:
             self._uniques.setdefault(day, set()).add(visitor_hash)
             self._online[visitor_hash] = time.monotonic()
 
-    def online_count(self, window_seconds: int = ONLINE_WINDOW_SECONDS) -> int:
-        floor = time.monotonic() - window_seconds
+    def online_count(self) -> int:
         with self._lock:
-            self._online = {k: t for k, t in self._online.items() if t > floor}
             return len(self._online)
 
     def drain(self) -> tuple[dict[tuple[str, str], int], dict[str, int]]:
         """Returns (pending hits, unique counts per day) and resets hit
         counters. Unique sets persist for the current day (they estimate a
-        daily total) — older days are dropped to bound memory."""
+        daily total) — older days are dropped to bound memory.
+        Also expires stale online-visitor entries to keep online_count() O(1)."""
+        floor = time.monotonic() - ONLINE_WINDOW_SECONDS
         with self._lock:
             hits, self._hits = self._hits, {}
             uniques = {day: len(hashes) for day, hashes in self._uniques.items()}
             current = today_utc()
             self._uniques = {d: h for d, h in self._uniques.items() if d == current}
+            self._online = {k: t for k, t in self._online.items() if t > floor}
             return hits, uniques
 
 
@@ -89,13 +90,14 @@ class TrafficService(BaseService):
             self._last_flush = time.monotonic()
             hits, uniques = self._tracker.drain()
         written = 0
-        for (day, path), count in hits.items():
-            self._repo.add_hits(day, path, count)
-            written += 1
-        for day, count in uniques.items():
-            if count:
-                self._repo.record_uniques(day, count)
+        with self._repo._db.transaction():
+            for (day, path), count in hits.items():
+                self._repo.add_hits(day, path, count)
                 written += 1
+            for day, count in uniques.items():
+                if count:
+                    self._repo.record_uniques(day, count)
+                    written += 1
         if written:
             self._logger.debug("traffic flushed", rows=written)
         return written

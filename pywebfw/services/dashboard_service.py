@@ -30,6 +30,15 @@ class DashboardService(BaseService):
         self._cache = cache
 
     def metrics(self) -> dict[str, Any]:
+        cache_key = "dashboard:metrics"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+        result = self._compute_metrics()
+        self._cache.set(cache_key, result, ttl_seconds=30)
+        return result
+
+    def _compute_metrics(self) -> dict[str, Any]:
         recent = self._logs.list_page(PageRequest.create(page=1, size=8))
         return {
             "counts": {
