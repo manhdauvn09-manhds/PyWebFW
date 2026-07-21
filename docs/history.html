@@ -36,6 +36,47 @@
             </thead>
             <tbody>
                 <tr>
+                    <td class="date">2026-07-22</td>
+                    <td class="commit">1ae6228</td>
+                    <td><strong>🛡️ CASAN Maturity Improvement — Docs + 18 Bug Fixes (Correctness/Security/Performance)</strong><br>
+                        <em>Commits: 0054778 → 08f4845 → 90e6de9 → 1ae6228</em><br>
+                        <strong>Tài liệu mới:</strong><br>
+                        • docs/SRS.md: Software Requirements Specification (~350 dòng)<br>
+                        • docs/spec.md: Architecture &amp; Design Specification (~380 dòng)<br>
+                        <strong>Correctness (4 fixes):</strong><br>
+                        • DB pool: rollback dirty connection trước khi trả pool sau write error<br>
+                        • Scheduler: run_job_now set _last_run trước await — ngăn duplicate job<br>
+                        • Cache: per-key threading.Lock trong get_or_set — chống thundering herd<br>
+                        • Scheduler: DailyTimeSchedule DST-safe fallback<br>
+                        <strong>Security (6 fixes):</strong><br>
+                        • settings.py: SECURITY_SECRET_KEY default="" + validate unconditional<br>
+                        • middleware.py: thêm Strict-Transport-Security (HSTS)<br>
+                        • admin_api.py: cookie Secure=True mặc định<br>
+                        • csv_export.py: Content-Disposition RFC 5987 percent-encoding<br>
+                        • scaffold.py: --forwarded-allow-ips 127.0.0.1 (không còn *)<br>
+                        • security.py: TotpProvider + 2FA TOTP endpoints<br>
+                        <strong>Performance (6 fixes):</strong><br>
+                        • schema.py: bảng traffic_stats/daily + 4 indexes (audit/traffic)<br>
+                        • dashboard_service.py: cache metrics 30s TTL<br>
+                        • traffic_service.py: batch transaction flush + O(1) online_count<br>
+                        • content_repository.py: loại bỏ body column khỏi list_published()<br>
+                        • scheduler/engine.py: _record() async với run_in_executor<br>
+                        <strong>Tests: 70/70 ✅ (tăng từ 63)</strong>
+                    </td>
+                    <td class="success">✅ Pushed → public/main</td>
+                </tr>
+                <tr>
+                    <td class="date">2026-07-22</td>
+                    <td class="commit">54daeb4</td>
+                    <td><strong>Merge public/main (f63b927) — sync CE features về local</strong><br>
+                        • Scheduler fix DailyTimeSchedule firing at start time<br>
+                        • Services mới: media, redirect, traffic, backup<br>
+                        • editions/community/ + tools/export_community.py<br>
+                        • test_batch2, test_batch3 (+257 dòng test)
+                    </td>
+                    <td class="success">✅ Pushed → public/main</td>
+                </tr>
+                <tr>
                     <td class="date">2026-06-14 00:35</td>
                     <td class="commit">9b6bafc</td>
                     <td><strong>✅ Cycle 5/5: 5-Cycle Audit Complete — System Production Hardened</strong><br>
