@@ -9,14 +9,19 @@ SPA/automation clients use the `Authorization: Bearer` header instead.
 """
 from __future__ import annotations
 
+import csv
+import io
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
-from pywebfw.core.exceptions import ConflictError, NotFoundError, SchedulerError
+from pywebfw.core.exceptions import ConflictError, NotFoundError, SchedulerError, ValidationFailedError
 from pywebfw.core.pagination import PageRequest
 from pywebfw.core.routing import BaseApiController
 from pywebfw.scheduler.engine import SchedulerEngine
-from pywebfw.domain.models import ContentItem, DbConnectionProfile, MenuArea, MenuItem, Role
+from pywebfw.domain.models import ContentItem, DbConnectionProfile, MenuArea, MenuItem, Redirect, Role
 from pywebfw.infrastructure.auth.manager import (
     ADMIN_TOKEN_COOKIE,
     BaseAuthHandler,
@@ -24,7 +29,9 @@ from pywebfw.infrastructure.auth.manager import (
     RoleGuard,
 )
 from pywebfw.repositories.log_repository import LogRepository
+from pywebfw.repositories.redirect_repository import RedirectRepository
 from pywebfw.services.auth_service import AuthService
+from pywebfw.services.redirect_service import RedirectService
 from pywebfw.services.contact_service import ContactService
 from pywebfw.services.content_service import ContentService
 from pywebfw.services.dashboard_service import DashboardService
@@ -38,6 +45,17 @@ from pywebfw.services.user_service import UserInput, UserService
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=128)
+    otp: str | None = None
+
+
+class OtpRequest(BaseModel):
+    otp: str = Field(min_length=6, max_length=8)
+
+
+class RedirectRequest(BaseModel):
+    from_path: str = Field(min_length=2, max_length=500)
+    to_path: str = Field(min_length=1, max_length=500)
+    status_code: int = 301
 
 
 class ChangePasswordRequest(BaseModel):
@@ -86,6 +104,33 @@ class DbConnectionRequest(BaseModel):
     is_default: bool = False
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def _safe_csv(value: str) -> str:
+    """Prefix cells that could be interpreted as formulas in spreadsheet apps."""
+    s = str(value)
+    if s and s[0] in _FORMULA_PREFIXES:
+        return "'" + s
+    return s
+
+
+def _csv_response(headers: list[str], rows: list[list[str]],
+                  filename: str) -> StreamingResponse:
+    """Build a streaming CSV response with formula-injection protection."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow([_safe_csv(cell) for cell in row])
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
 class AdminApiController(BaseApiController):
     """Base for every admin resource controller: shared prefix + RBAC guard.
     Users flagged `must_change_password` are blocked from every resource
@@ -110,9 +155,9 @@ class AdminAuthApiController(AdminApiController):
     enforce_password_change = False
 
     def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
-                 cookie_secure: bool = False) -> None:
+                 cookie_secure: bool = True) -> None:
         super().__init__(auth_handler, auth_service)
-        # True in production: cookie only ever travels over HTTPS.
+        # True by default; set COOKIE_SECURE=false only for local HTTP dev.
         self._cookie_secure = cookie_secure
 
     def _set_session_cookie(self, response: Response, token: str) -> None:
@@ -125,9 +170,26 @@ class AdminAuthApiController(AdminApiController):
     def _register(self, router: APIRouter) -> None:
         @router.post("/login")
         def login(payload: LoginRequest, response: Response) -> dict:
-            result = self._auth_service.login(payload.username, payload.password)
+            result = self._auth_service.login(payload.username, payload.password, payload.otp)
             self._set_session_cookie(response, result.token)
             return self.ok({"token": result.token, "user": result.user.to_public_dict()})
+
+        @router.post("/2fa/setup")
+        def totp_setup(user: CurrentUser = Depends(self._guard)) -> dict:
+            secret, uri = self._auth_service.setup_totp(user.id)
+            return self.ok({"secret": secret, "otpauth_uri": uri})
+
+        @router.post("/2fa/enable")
+        def totp_enable(payload: OtpRequest,
+                        user: CurrentUser = Depends(self._guard)) -> dict:
+            self._auth_service.enable_totp(user.id, payload.otp)
+            return self.ok({"totp_enabled": True})
+
+        @router.post("/2fa/disable")
+        def totp_disable(payload: OtpRequest,
+                         user: CurrentUser = Depends(self._guard)) -> dict:
+            self._auth_service.disable_totp(user.id, payload.otp)
+            return self.ok({"totp_enabled": False})
 
         @router.post("/change-password")
         def change_password(payload: ChangePasswordRequest, response: Response,
@@ -172,6 +234,17 @@ class AdminUserApiController(AdminApiController):
         ) -> dict:
             result = self._users.list_users(PageRequest.create(page, size, sort_by, sort_desc))
             return self.paginated(result, lambda u: u.to_public_dict())
+
+        @router.get("/export")
+        def export_users(user: CurrentUser = Depends(self._guard)) -> StreamingResponse:
+            actor = self._actor_name(user)
+            all_users = self._users.export_all(actor)
+            headers = ["id", "username", "email", "role", "is_active",
+                       "must_change_password", "totp_enabled", "created_at"]
+            rows = [[str(u.id), u.username, u.email, u.role.value,
+                     str(u.is_active), str(u.must_change_password),
+                     str(u.totp_enabled), u.created_at] for u in all_users]
+            return _csv_response(headers, rows, "users.csv")
 
         @router.get("/{user_id}")
         def get_user(user_id: int, user: CurrentUser = Depends(self._guard)) -> dict:
@@ -302,6 +375,16 @@ class AdminContactApiController(AdminApiController):
             self._contact.delete(message_id, actor=self._actor_name(user))
             return self.ok({"deleted": message_id})
 
+        @router.get("/export")
+        def export_messages(user: CurrentUser = Depends(self._guard)) -> StreamingResponse:
+            actor = self._actor_name(user)
+            items = self._contact.export_all(actor)  # list[dict]
+            headers = ["id", "name", "email", "subject", "message", "is_read", "created_at"]
+            rows = [[str(m.get("id", "")), m.get("name", ""), m.get("email", ""),
+                     m.get("subject", ""), m.get("message", ""),
+                     str(m.get("is_read", "")), m.get("created_at", "")] for m in items]
+            return _csv_response(headers, rows, "messages.csv")
+
 
 class AdminLogApiController(AdminApiController):
     prefix = "/api/admin/logs"
@@ -322,6 +405,15 @@ class AdminLogApiController(AdminApiController):
             where, params = ("level = ?", (level,)) if level else (None, ())
             result = self._logs.list_page(PageRequest.create(page, size), where, params)
             return self.paginated(result, lambda log: log.to_dict())
+
+        @router.get("/export")
+        def export_logs(user: CurrentUser = Depends(self._guard)) -> StreamingResponse:
+            logs = self._logs.list_all()
+            headers = ["id", "actor", "action", "target", "detail", "level", "created_at"]
+            rows = [[str(l.id), l.actor, l.action, l.target, l.detail, l.level, l.created_at]
+                    for l in logs]
+            return _csv_response(headers, rows, "audit_logs.csv")
+
 
 class AdminDashboardApiController(AdminApiController):
     prefix = "/api/admin/dashboard"
@@ -406,3 +498,40 @@ class AdminSystemApiController(AdminApiController):
         def delete_profile(profile_id: int, user: CurrentUser = Depends(self._guard)) -> dict:
             self._system.delete_profile(profile_id, self._actor_name(user))
             return self.ok({"deleted": profile_id})
+
+
+class AdminRedirectApiController(AdminApiController):
+    prefix = "/api/admin/redirects"
+
+    def __init__(self, auth_handler: BaseAuthHandler, auth_service: AuthService,
+                 redirects: RedirectService) -> None:
+        super().__init__(auth_handler, auth_service)
+        self._redirects = redirects
+
+    def _register(self, router: APIRouter) -> None:
+        @router.get("")
+        def list_redirects(
+            page: int = Query(1, ge=1),
+            size: int = Query(20, ge=1, le=100),
+            user: CurrentUser = Depends(self._guard),
+        ) -> dict:
+            from pywebfw.core.pagination import PageRequest
+            result = self._redirects.list_redirects(PageRequest.create(page, size))
+            return self.paginated(result, lambda r: r.to_dict())
+
+        @router.post("", status_code=201)
+        def create_redirect(payload: RedirectRequest,
+                            user: CurrentUser = Depends(self._guard)) -> dict:
+            redirect = Redirect(
+                from_path=payload.from_path,
+                to_path=payload.to_path,
+                status_code=payload.status_code,
+            )
+            created = self._redirects.create(redirect, actor=self._actor_name(user))
+            return self.ok(created.to_dict())
+
+        @router.delete("/{redirect_id}")
+        def delete_redirect(redirect_id: int,
+                            user: CurrentUser = Depends(self._guard)) -> dict:
+            self._redirects.delete(redirect_id, actor=self._actor_name(user))
+            return self.ok({"deleted": redirect_id})

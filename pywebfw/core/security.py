@@ -89,6 +89,69 @@ class TokenManager:
         return hmac.new(self._key, body, hashlib.sha256).hexdigest()
 
 
+class TotpProvider:
+    """RFC 6238 TOTP (Time-based One-Time Password) using stdlib only.
+
+    Compatible with Google Authenticator / Authy / any TOTP app.
+    30-second window, 6-digit codes, SHA-1 (TOTP standard).
+    """
+
+    def __init__(self, digits: int = 6, step: int = 30, window: int = 1) -> None:
+        self._digits = digits
+        self._step = step
+        self._window = window  # number of steps ±1 accepted for clock skew
+
+    # ------------------------------------------------------------------
+    def generate_secret(self) -> str:
+        """Return a random 20-byte Base32-encoded secret (no padding)."""
+        raw = secrets.token_bytes(20)
+        return base64.b32encode(raw).decode().rstrip("=")
+
+    def _hotp(self, secret: str, counter: int) -> str:
+        """Compute HOTP value for given secret and counter."""
+        # Pad Base32 to multiple of 8
+        padded = secret.upper() + "=" * (-len(secret) % 8)
+        try:
+            key = base64.b32decode(padded)
+        except Exception:
+            return ""
+        msg = counter.to_bytes(8, "big")
+        h = hmac.new(key, msg, hashlib.sha1).digest()
+        offset = h[-1] & 0x0F
+        code_int = (
+            ((h[offset] & 0x7F) << 24)
+            | (h[offset + 1] << 16)
+            | (h[offset + 2] << 8)
+            | h[offset + 3]
+        ) % (10 ** self._digits)
+        return str(code_int).zfill(self._digits)
+
+    def current_code(self, secret: str) -> str:
+        """Return the current TOTP code."""
+        counter = int(time.time()) // self._step
+        return self._hotp(secret, counter)
+
+    def verify(self, secret: str, code: str) -> bool:
+        """Verify a TOTP code, accepting ±window steps for clock skew."""
+        if not secret or not code:
+            return False
+        counter = int(time.time()) // self._step
+        for delta in range(-self._window, self._window + 1):
+            if hmac.compare_digest(self._hotp(secret, counter + delta), code):
+                return True
+        return False
+
+    def provisioning_uri(self, secret: str, account: str,
+                         issuer: str = "PyWebFW") -> str:
+        """Return an otpauth:// URI for QR-code provisioning."""
+        from urllib.parse import quote
+        return (
+            f"otpauth://totp/{quote(issuer)}:{quote(account)}"
+            f"?secret={secret}&issuer={quote(issuer)}&digits={self._digits}"
+            f"&period={self._step}"
+        )
+
+
 class SlidingWindowRateLimiter:
     """In-memory per-key sliding window. Swap for Redis behind same interface
     when running multiple instances."""

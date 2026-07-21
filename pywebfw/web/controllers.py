@@ -23,6 +23,7 @@ from pywebfw.services.contact_service import ContactService
 from pywebfw.services.content_service import ContentService
 from pywebfw.services.dashboard_service import DashboardService
 from pywebfw.services.menu_service import MenuService
+from pywebfw.services.redirect_service import RedirectService
 from pywebfw.services.search_service import SearchService
 from pywebfw.services.site_settings_service import SiteSettingsService
 from pywebfw.services.system_service import SystemService
@@ -38,6 +39,7 @@ from pywebfw.web.pages.admin import (
     JobsMonitorPage,
     LogManagementPage,
     MenuManagementPage,
+    RedirectManagementPage,
     SettingsPage,
     UserManagementPage,
 )
@@ -155,20 +157,28 @@ class PublicWebController(BaseController):
 
 class DynamicContentController(BaseController):
     """Catch-all `/{slug}` page route, mounted LAST so every fixed route wins
-    first. Content created in the admin CMS is instantly reachable; unknown
-    slugs fall through to the 404/redirect pipeline."""
+    first. Checks active redirects before serving content; unknown slugs return
+    a styled 404."""
 
     tags = ["public-web"]
 
     def __init__(self, settings: AppSettings, menus: MenuService,
-                 contents: ContentService) -> None:
+                 contents: ContentService,
+                 redirects: RedirectService | None = None) -> None:
         self._settings = settings
         self._menus = menus
         self._contents = contents
+        self._redirects = redirects
 
     def _register(self, router: APIRouter) -> None:
         @router.get("/{slug}", response_class=HTMLResponse, include_in_schema=False)
-        def content_page(slug: str, request: Request) -> HTMLResponse:
+        def content_page(slug: str, request: Request) -> Response:
+            # Check redirect rules before attempting to serve content.
+            if self._redirects:
+                match = self._redirects.resolve(request.url.path)
+                if match:
+                    to_path, status_code = match
+                    return RedirectResponse(to_path, status_code=status_code)
             ctx = PageContext(
                 site_name=self._settings.name,
                 path=request.url.path,
@@ -192,6 +202,7 @@ class AdminWebDeps:
     contents: ContentService
     site_settings: SiteSettingsService
     contact: ContactService
+    redirects: RedirectService | None = None
     engine: SchedulerEngine | None = None
 
 
@@ -243,6 +254,7 @@ class AdminWebController(BaseController):
             "/settings": lambda ctx: SettingsPage(ctx, deps.site_settings),
             "/logs": lambda ctx: LogManagementPage(ctx, deps.logs),
             "/db-connections": lambda ctx: DbConnectionManagementPage(ctx, deps.system),
+            "/redirects": lambda ctx: RedirectManagementPage(ctx, deps.redirects),
         }
         for path, factory in protected.items():
             self._add_protected_route(router, path, factory)

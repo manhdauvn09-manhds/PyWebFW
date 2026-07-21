@@ -8,6 +8,7 @@ from __future__ import annotations
 import csv
 import io
 from typing import Any, Mapping, Sequence
+from urllib.parse import quote
 
 from fastapi import Response
 
@@ -37,5 +38,5 @@ class CsvExporter:
         return Response(
             content=cls.to_csv(rows, columns),
             media_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
         )

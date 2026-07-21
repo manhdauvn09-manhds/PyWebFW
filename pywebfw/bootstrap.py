@@ -30,6 +30,7 @@ from pywebfw.api.admin_api import (
     AdminDashboardApiController,
     AdminLogApiController,
     AdminMenuApiController,
+    AdminRedirectApiController,
     AdminSettingsApiController,
     AdminSystemApiController,
     AdminUserApiController,
@@ -69,6 +70,7 @@ from pywebfw.repositories.content_repository import ContentRepository
 from pywebfw.repositories.db_connection_repository import DbConnectionRepository
 from pywebfw.repositories.log_repository import LogRepository
 from pywebfw.repositories.menu_repository import MenuRepository
+from pywebfw.repositories.redirect_repository import RedirectRepository
 from pywebfw.repositories.setting_repository import SettingRepository
 from pywebfw.repositories.user_repository import UserRepository
 from pywebfw.scheduler.engine import JobRegistry, SchedulerEngine
@@ -86,6 +88,7 @@ from pywebfw.services.contact_service import ContactService
 from pywebfw.services.content_service import ContentService
 from pywebfw.services.dashboard_service import DashboardService
 from pywebfw.services.menu_service import MenuService
+from pywebfw.services.redirect_service import RedirectService
 from pywebfw.services.search_service import SearchService
 from pywebfw.services.site_settings_service import SiteSettingsService
 from pywebfw.services.system_service import (
@@ -164,8 +167,14 @@ class ApplicationBuilder:
                  f"Attempts: {payload['attempts']}\nError: {payload['error']}"),
             )
 
+        def auto_redirect_on_slug_change(event: DomainEvent) -> None:
+            payload = event.payload
+            c.resolve(RedirectService).auto_create(
+                payload["old_path"], payload["new_path"], actor="system")
+
         bus.subscribe("contact.submitted", notify_admin_of_contact)
         bus.subscribe("job.failed", alert_failed_job)
+        bus.subscribe("content.slug_changed", auto_redirect_on_slug_change)
         for plugin in self._plugins:
             plugin.subscribe_events(bus, c)
 
@@ -203,7 +212,8 @@ class ApplicationBuilder:
         c = self._container
         for repo_type in (UserRepository, MenuRepository, LogRepository,
                           ContentRepository, DbConnectionRepository,
-                          SettingRepository, ContactRepository):
+                          SettingRepository, ContactRepository,
+                          RedirectRepository):
             c.register_singleton(
                 repo_type,
                 lambda c, rt=repo_type: rt(c.resolve(BaseDatabaseManager)))
@@ -228,6 +238,9 @@ class ApplicationBuilder:
             c.resolve(EventBus)))
         c.register_singleton(SiteSettingsService, lambda c: SiteSettingsService(
             c.resolve(SettingRepository), c.resolve(BaseCacheManager),
+            c.resolve(LogRepository)))
+        c.register_singleton(RedirectService, lambda c: RedirectService(
+            c.resolve(RedirectRepository), c.resolve(BaseCacheManager),
             c.resolve(LogRepository)))
         c.register_singleton(DashboardService, lambda c: DashboardService(
             c.resolve(BaseDatabaseManager), c.resolve(UserRepository),
@@ -375,6 +388,7 @@ class ApplicationBuilder:
                 contents=c.resolve(ContentService),
                 site_settings=c.resolve(SiteSettingsService),
                 contact=c.resolve(ContactService),
+                redirects=c.resolve(RedirectService),
                 engine=engine,
             )
             controllers += [
@@ -394,6 +408,8 @@ class ApplicationBuilder:
                                            c.resolve(SiteSettingsService)),
                 AdminSystemApiController(auth_handler, auth_service,
                                          c.resolve(SystemService), engine),
+                AdminRedirectApiController(auth_handler, auth_service,
+                                           c.resolve(RedirectService)),
             ]
 
         # Plugin controllers mount after the built-ins...
@@ -403,7 +419,8 @@ class ApplicationBuilder:
         # ...and the /{slug} catch-all MUST be the very last route registered.
         if settings.has_module(MODULE_PUBLIC):
             controllers.append(DynamicContentController(
-                settings, c.resolve(MenuService), c.resolve(ContentService)))
+                settings, c.resolve(MenuService), c.resolve(ContentService),
+                redirects=c.resolve(RedirectService)))
 
         for controller in controllers:
             app.include_router(controller.build_router())

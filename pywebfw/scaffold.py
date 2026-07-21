@@ -171,7 +171,8 @@ RUN useradd --create-home appuser && mkdir -p /app/data && chown -R appuser:appu
 USER appuser
 EXPOSE 8000
 CMD ["uvicorn", "__PROJECT__.main:app", "--host", "0.0.0.0", "--port", "8000", \\
-     "--proxy-headers", "--forwarded-allow-ips", "*"]
+     "--proxy-headers", "--forwarded-allow-ips", "127.0.0.1"]
+# Set --forwarded-allow-ips to the actual reverse proxy IP in production.
 """,
 
     ".gitignore": """.venv/

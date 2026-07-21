@@ -180,7 +180,7 @@ class SettingsFactory:
                 dsn=env.text("DB_DSN", ""),
             ),
             security=SecuritySettings(
-                secret_key=env.text("SECURITY_SECRET_KEY", "dev-only-insecure-secret"),
+                secret_key=env.text("SECURITY_SECRET_KEY", ""),
                 token_ttl_seconds=env.integer("SECURITY_TOKEN_TTL_SECONDS", 3600),
                 password_iterations=env.integer("SECURITY_PASSWORD_ITERATIONS", 310_000),
             ),
@@ -205,8 +205,13 @@ class SettingsFactory:
 
     @staticmethod
     def _validate(settings: AppSettings) -> None:
-        if settings.is_production and settings.security.secret_key == "dev-only-insecure-secret":
-            raise RuntimeError("SECURITY_SECRET_KEY must be set in production")
+        key = settings.security.secret_key
+        if not key or len(key) < 32:
+            raise RuntimeError(
+                "SECURITY_SECRET_KEY must be set to a random string ≥32 characters")
+        if key == "dev-only-insecure-secret":
+            raise RuntimeError(
+                "SECURITY_SECRET_KEY is still the default insecure value — set a real secret")
 
 
 @lru_cache(maxsize=1)

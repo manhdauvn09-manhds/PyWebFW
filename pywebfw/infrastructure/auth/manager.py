@@ -8,8 +8,6 @@
   dependencies — RoleGuard *is an* AuthGuard with RBAC plus an optional
   "must change password first" policy gate.
 """
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 

@@ -57,6 +57,12 @@ class UserService(BaseService, AuditMixin):
     def list_users(self, page: PageRequest) -> PageResult[User]:
         return self._users.list_page(page)
 
+    def export_all(self, actor: str) -> list[User]:
+        """Bulk user export (no password hashes). Audited."""
+        items = self._users.list_all()
+        self._audit(actor, "users.exported")
+        return items
+
     def get(self, user_id: int) -> User:
         return self._users.get_by_id(user_id)
 

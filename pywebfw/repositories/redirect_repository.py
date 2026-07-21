@@ -40,8 +40,17 @@ class RedirectRepository(BaseRepository[Redirect]):
 
     def find_by_from_path(self, from_path: str) -> Redirect | None:
         row = self._db.fetch_one(
-            "SELECT * FROM redirects WHERE from_path = ?", (from_path,))
+            "SELECT * FROM redirects WHERE from_path = ? AND is_active = 1", (from_path,))
         return self._map_row(row) if row else None
+
+    def exists_from_path(self, from_path: str, exclude_id: int | None = None) -> bool:
+        sql = "SELECT COUNT(*) AS n FROM redirects WHERE from_path = ?"
+        params: list[Any] = [from_path]
+        if exclude_id is not None:
+            sql += " AND id != ?"
+            params.append(exclude_id)
+        row = self._db.fetch_one(sql, params)
+        return bool(row and row["n"] > 0)
 
     def list_active(self) -> list[Redirect]:
         rows = self._db.fetch_all("SELECT * FROM redirects WHERE is_active = 1")

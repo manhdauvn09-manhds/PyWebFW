@@ -119,7 +119,34 @@ class AdminPasswordChangePage(AdminPage):
         return "Account Security"
 
     def build_content(self) -> str:
-        pw_script = _CHANGE_PASSWORD_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
+        nonce = esc(self._ctx.csp_nonce)
+        pw_script = _CHANGE_PASSWORD_SCRIPT.replace("__NONCE__", nonce)
+        tfa_script = f"""
+<script nonce="{nonce}">
+document.getElementById('tfa-setup').addEventListener('click', async () => {{
+  const msg = document.getElementById('tfa-message');
+  const res = await fetch('/api/admin/auth/2fa/setup', {{
+    method: 'POST', headers: {{'Content-Type': 'application/json', 'X-Requested-With': 'fetch'}}
+  }});
+  const payload = await res.json();
+  if (payload.success) {{
+    document.getElementById('tfa-secret-box').style.display = 'block';
+    document.getElementById('tfa-secret').textContent = payload.data.secret;
+    document.getElementById('tfa-uri').href = payload.data.otpauth_uri;
+  }} else {{ msg.textContent = payload.error?.message || 'Setup failed'; }}
+}});
+document.getElementById('tfa-enable-form').addEventListener('submit', async (e) => {{
+  e.preventDefault();
+  const otp = document.getElementById('tfa-otp').value;
+  const msg = document.getElementById('tfa-message');
+  const res = await fetch('/api/admin/auth/2fa/enable', {{
+    method: 'POST', headers: {{'Content-Type': 'application/json', 'X-Requested-With': 'fetch'}},
+    body: JSON.stringify({{otp}})
+  }});
+  const payload = await res.json();
+  msg.textContent = payload.success ? '2FA enabled.' : (payload.error?.message || 'Failed');
+}});
+</script>"""
         return (
             "<h1>Account security</h1>"
             "<h2>Change password</h2>"
@@ -132,6 +159,17 @@ class AdminPasswordChangePage(AdminPage):
             '<button type="submit">Update password</button>'
             '<div class="form-message" role="alert"></div></form>'
             f"{pw_script}"
+            "<h2>Two-factor authentication</h2>"
+            '<p>Use an authenticator app (e.g. Google Authenticator) to add a second factor.</p>'
+            '<button id="tfa-setup">Set up 2FA</button>'
+            '<div id="tfa-secret-box" style="display:none">'
+            '<p>Secret: <code id="tfa-secret"></code> &nbsp; '
+            '<a id="tfa-uri" href="#">Open in authenticator</a></p>'
+            '<form id="tfa-enable-form">'
+            '<label>Enter OTP code to confirm<input id="tfa-otp" name="otp" required maxlength="8"></label>'
+            '<button type="submit">Enable 2FA</button></form></div>'
+            '<div id="tfa-message" role="alert"></div>'
+            f"{tfa_script}"
         )
 
 
@@ -693,3 +731,73 @@ class DbConnectionManagementPage(AdminPage):
         status = "Healthy" if health["healthy"] else "Unhealthy"
         return (f"<h1>DB Connection Profiles ({result.total})</h1>{table.render()}"
                 f"<p>System health: <strong>{esc(status)}</strong></p>")
+
+
+_REDIRECT_SCRIPT = """
+<script nonce="__NONCE__">
+const form = document.getElementById('redirect-form');
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const message = form.querySelector('.form-message');
+  const payload = {
+    from_path: form.from_path.value,
+    to_path: form.to_path.value,
+  };
+  const res = await fetch('/api/admin/redirects', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'fetch'},
+    body: JSON.stringify(payload),
+  });
+  const result = await res.json();
+  if (result.success) { window.location = '/admin/redirects'; }
+  else { message.textContent = result.error?.message || 'Save failed'; }
+});
+document.querySelectorAll('.redirect-delete').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    if (!confirm('Delete this redirect?')) return;
+    const res = await fetch(`/api/admin/redirects/${btn.dataset.id}`, {
+      method: 'DELETE', headers: {'X-Requested-With': 'fetch'},
+    });
+    if ((await res.json()).success) { window.location = '/admin/redirects'; }
+  });
+});
+</script>
+"""
+
+
+class RedirectManagementPage(AdminPage):
+    """Manage URL redirect rules (SEO-safe slug renames, moved pages)."""
+
+    from pywebfw.services.redirect_service import RedirectService as _RS
+
+    def __init__(self, ctx: PageContext, redirects: _RS) -> None:
+        super().__init__(ctx)
+        self._redirects = redirects
+
+    @property
+    def title(self) -> str:
+        return "Redirects"
+
+    def build_content(self) -> str:
+        result = self._redirects.list_redirects(PageRequest.create(size=200))
+        rows = "".join(
+            f"<tr><td>{esc(r.from_path)}</td><td>{esc(r.to_path)}</td>"
+            f"<td>{r.status_code}</td><td>{r.hits}</td>"
+            f'<td><button class="redirect-delete" data-id="{r.id}">Delete</button></td></tr>'
+            for r in result.items
+        ) or "<tr><td colspan='5'>No redirects</td></tr>"
+        script = _REDIRECT_SCRIPT.replace("__NONCE__", esc(self._ctx.csp_nonce))
+        return (
+            "<h1>Redirect Rules</h1>"
+            '<table class="data-table"><thead><tr>'
+            "<th>From</th><th>To</th><th>Code</th><th>Hits</th><th></th>"
+            f"</tr></thead><tbody>{rows}</tbody></table>"
+            '<h2>Add redirect</h2>'
+            '<form id="redirect-form" class="app-form">'
+            '<label>From path<input name="from_path" placeholder="/old-page" required></label>'
+            '<label>To path<input name="to_path" placeholder="/new-page" required></label>'
+            '<button type="submit">Add redirect</button>'
+            '<div class="form-message" role="alert"></div></form>'
+            f"{script}"
+        )
+
