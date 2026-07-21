@@ -222,6 +222,10 @@ class PooledDatabaseManager(BaseDatabaseManager, ABC):
             raise ConflictError("Conflict: duplicate value or invalid reference") from exc
         except self._errors as exc:
             self._logger.error("statement failed", error=str(exc))
+            try:
+                conn.raw.rollback()
+            except Exception:
+                pass
             raise DatabaseError("Database operation failed") from exc
 
     @contextlib.contextmanager

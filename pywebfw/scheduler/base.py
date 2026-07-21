@@ -94,8 +94,18 @@ class DailyTimeSchedule(Schedule):
         # time silently drifts to whenever the process last started (monotonic
         # resets to ~0 on boot, so the first check fires immediately). On mcp-80
         # this pinned the 02:30 backup to 14:20 — the container's start time.
-        last_run_wall = now - timedelta(seconds=now_monotonic - last_run_monotonic)
-        return last_run_wall < target
+        #
+        # DST limitation: monotonic→wall reconstruction is inaccurate across a
+        # DST boundary (the wall clock jumps ±1h while monotonic does not). On a
+        # DST transition the job may fire one extra time or be skipped once.
+        # A complete fix requires SchedulerEngine to pass a wall-clock last_run_dt;
+        # for now we wrap in try/except and fire (return True) on any arithmetic
+        # error so the job is never silently skipped.
+        try:
+            last_run_wall = now - timedelta(seconds=now_monotonic - last_run_monotonic)
+            return last_run_wall < target
+        except Exception:
+            return True
 
     def describe(self) -> str:
         return f"daily at {self.hour:02d}:{self.minute:02d}"

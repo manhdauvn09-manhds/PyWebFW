@@ -60,6 +60,8 @@ class InMemoryCacheManager(BaseCacheManager):
         self._lock = threading.RLock()
         self._hits = 0
         self._misses = 0
+        self._key_locks: dict[str, threading.Lock] = {}
+        self._locks_lock = threading.Lock()
 
     def get(self, key: str) -> Any | None:
         with self._lock:
@@ -102,3 +104,23 @@ class InMemoryCacheManager(BaseCacheManager):
     def stats(self) -> dict[str, Any]:
         with self._lock:
             return {"entries": len(self._store), "hits": self._hits, "misses": self._misses}
+
+    def get_or_set(self, key: str, loader: Callable[[], Any], ttl_seconds: int | None = None) -> Any:
+        """Override with per-key locking to prevent thundering-herd on cold keys."""
+        # Fast path: key already warm.
+        val = self.get(key)
+        if val is not None:
+            return val
+        # Acquire a per-key lock so only one thread calls loader().
+        with self._locks_lock:
+            if key not in self._key_locks:
+                self._key_locks[key] = threading.Lock()
+            key_lock = self._key_locks[key]
+        with key_lock:
+            val = self.get(key)
+            if val is not None:
+                return val
+            val = loader()
+            if val is not None:
+                self.set(key, val, ttl_seconds)
+            return val

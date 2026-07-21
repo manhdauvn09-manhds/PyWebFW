@@ -89,20 +89,20 @@ class SchedulerEngine:
             await asyncio.sleep(self._tick)
 
     async def _run_and_record(self, job: BaseSchedulerJob) -> None:
-        self._record(await job.execute())
+        await self._record(await job.execute())
 
     async def run_job_now(self, name: str) -> JobResult:
         """Manual trigger (used by admin tooling/tests)."""
-        result = await self._registry.get(name).execute()
         self._last_run[name] = time.monotonic()
-        self._record(result)
+        result = await self._registry.get(name).execute()
+        await self._record(result)
         return result
 
     @property
     def registry(self) -> JobRegistry:
         return self._registry
 
-    def _record(self, result: JobResult) -> None:
+    async def _record(self, result: JobResult) -> None:
         self._last_result[result.job_name] = result
         if result.status is JobStatus.FAILED and self._events is not None:
             # Subscribers (e.g. an email alert) react in bootstrap wiring.
@@ -110,10 +110,12 @@ class SchedulerEngine:
         if self._audit_logs is not None:
             level = "info" if result.status is JobStatus.SUCCESS else "error"
             try:
-                self._audit_logs.add(AuditLog(
+                loop = asyncio.get_running_loop()
+                log_entry = AuditLog(
                     actor="scheduler", action=f"job.{result.status.value}",
                     target=result.job_name,
-                    detail=result.message or result.error, level=level))
+                    detail=result.message or result.error, level=level)
+                await loop.run_in_executor(None, self._audit_logs.add, log_entry)
             except Exception:
                 self._logger.warning("failed to persist job audit log",
                                      job=result.job_name)
