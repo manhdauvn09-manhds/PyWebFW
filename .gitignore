@@ -14,3 +14,6 @@ contracts/
 CLAUDE.md
 CLAUDE.harness.md
 tools/harness-bundle/
+
+# Harness Portal ingest key - secret, never commit (C5)
+.harness/portal-sync.key

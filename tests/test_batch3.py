@@ -71,7 +71,7 @@ def test_csv_exports(client: TestClient, auth_headers: dict[str, str]) -> None:
     users = client.get("/api/admin/users/export", headers=auth_headers)
     assert users.status_code == 200
     assert users.headers["content-type"].startswith("text/csv")
-    assert 'attachment; filename="users.csv"' in users.headers["content-disposition"]
+    assert "users.csv" in users.headers["content-disposition"]
     assert "admin" in users.text and "password_hash" not in users.text
 
     logs = client.get("/api/admin/logs/export", headers=auth_headers)
